@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  pi-system-mock:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pi-system-mock
+    ports:
+      - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
+    volumes:
+      - ../src:/app/src
+      - ../pi_data:/app/pi_data
+      - ../logs:/app/logs
+      - ../db:/app/db  # データベースファイル用のボリューム
+      - ../package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
+      - DB_PATH=/app/db/pi_data.db  # データベースファイルのパス
+    restart: unless-stopped

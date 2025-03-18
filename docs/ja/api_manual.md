@@ -1,0 +1,659 @@
+# DataStream Hub API マニュアル
+
+## 目次
+
+1. [API概要](#api概要)
+2. [システム情報 API](#システム情報-api)
+3. [タグデータ操作 API](#タグデータ操作-api)
+4. [データ処理 API](#データ処理-api)
+5. [レスポンス形式](#レスポンス形式)
+6. [表示名オプション](#表示名オプション)
+7. [実装例](#実装例)
+
+## API概要
+
+DataStream Hubは、製造設備の時系列データにアクセスするためのRESTful APIを提供しています。全てのAPIエンドポイントは、標準的なHTTPメソッドとJSONレスポンス形式を使用しています。
+
+### ベースURL
+
+```
+http://{hostname}:{port}/api
+```
+
+デフォルト設定では:
+- 開発環境: `http://localhost:3001/api`
+- Docker環境: `http://localhost:3001/api`
+
+### 共通パラメータ
+
+多くのAPIエンドポイントで使用できる共通パラメータ:
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `display` | Boolean | タグの表示名を含めるかどうか | false |
+| `lang` | String | 表示名の言語コード (例: "ja", "en") | "ja" |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするかどうか | false |
+
+### エラーレスポンス
+
+エラーが発生した場合、APIは適切なHTTPステータスコードとJSONエラーオブジェクトを返します:
+
+```json
+{
+  "error": "エラーの種類",
+  "message": "詳細なエラーメッセージ"
+}
+```
+
+一般的なHTTPステータスコード:
+
+- `200 OK` - リクエスト成功
+- `400 Bad Request` - 不正なリクエスト
+- `404 Not Found` - リソースが見つからない
+- `500 Internal Server Error` - サーバー内部エラー
+
+## システム情報 API
+
+### システム情報の取得
+
+```
+GET /api/system/info
+```
+
+システムの基本情報を取得します。
+
+**レスポンス例:**
+
+```json
+{
+  "name": "DataStream Hub",
+  "version": "1.0.0",
+  "tagCount": 48,
+  "equipmentCount": 3,
+  "environment": "development",
+  "storage": "SQLite database"
+}
+```
+
+### サーバーステータスの取得
+
+```
+GET /api/status
+```
+
+サーバーの現在の状態と統計情報を取得します。
+
+**レスポンス例:**
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2023-01-01T12:00:00.000Z",
+  "environment": "development",
+  "database": {
+    "type": "SQLite",
+    "tags": 48,
+    "equipment": 3,
+    "dataPoints": 12480
+  }
+}
+```
+
+## タグデータ操作 API
+
+### タグ一覧の取得
+
+```
+GET /api/tags
+```
+
+システム内のすべてのタグ情報を取得します。
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `display` | Boolean | タグの表示名を含めるかどうか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+
+**レスポンス例:**
+
+```json
+{
+  "tags": [
+    {
+      "id": "Pump01.Temperature",
+      "equipment": "Pump01",
+      "name": "Temperature",
+      "unit": "°C",
+      "min": 50.2,
+      "max": 79.8,
+      "display_name": "ポンプ01.温度"
+    },
+    ...
+  ]
+}
+```
+
+### 設備一覧の取得
+
+```
+GET /api/equipment
+```
+
+システム内のすべての設備情報を取得します。
+
+**レスポンス例:**
+
+```json
+{
+  "equipment": [
+    {
+      "id": "Pump01",
+      "name": "Pump01",
+      "tagCount": 4
+    },
+    ...
+  ]
+}
+```
+
+### 特定タグのデータ取得
+
+```
+GET /api/data/:tagId
+```
+
+指定したタグIDのデータを取得します。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `tagId` | String | 取得するタグのID (例: "Pump01.Temperature") |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+
+**レスポンス例:**
+
+```json
+{
+  "tagId": "Pump01.Temperature",
+  "metadata": {
+    "id": "Pump01.Temperature",
+    "equipment": "Pump01",
+    "name": "Temperature",
+    "unit": "°C",
+    "min": 50.2,
+    "max": 79.8,
+    "display_name": "ポンプ01.温度"
+  },
+  "data": [
+    {
+      "timestamp": "2023-01-01T00:00:00.000Z",
+      "value": 75.2
+    },
+    {
+      "timestamp": "2023-01-01T00:10:00.000Z",
+      "value": 76.1
+    },
+    ...
+  ]
+}
+```
+
+### 複数タグのバッチ取得
+
+```
+GET /api/batch
+```
+
+複数のタグデータを一度に取得します。
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `tags` | String | カンマ区切りのタグID (必須) | - |
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+
+**リクエスト例:**
+
+```
+GET /api/batch?tags=Pump01.Temperature,Pump01.Pressure&timeshift=true&display=true
+```
+
+**レスポンス例:**
+
+```json
+{
+  "Pump01.Temperature": {
+    "metadata": {
+      "id": "Pump01.Temperature",
+      "equipment": "Pump01",
+      "name": "Temperature",
+      "unit": "°C",
+      "min": 50.2,
+      "max": 79.8,
+      "display_name": "ポンプ01.温度"
+    },
+    "data": [
+      {
+        "timestamp": "2023-03-01T12:00:00.000Z",
+        "value": 75.2
+      },
+      ...
+    ]
+  },
+  "Pump01.Pressure": {
+    "metadata": {
+      "id": "Pump01.Pressure",
+      "equipment": "Pump01",
+      "name": "Pressure",
+      "unit": "kPa",
+      "min": 100.3,
+      "max": 150.7,
+      "display_name": "ポンプ01.圧力"
+    },
+    "data": [
+      {
+        "timestamp": "2023-03-01T12:00:00.000Z",
+        "value": 120.5
+      },
+      ...
+    ]
+  }
+}
+```
+
+### 最新値の取得
+
+```
+GET /api/current
+```
+
+複数タグの最新値を取得します。ポーリング機能の実装に最適です。
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `tags` | String | カンマ区切りのタグID (必須) | - |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+
+**リクエスト例:**
+
+```
+GET /api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
+```
+
+**レスポンス例:**
+
+```json
+{
+  "Pump01.Temperature": {
+    "timestamp": "2023-03-01T12:30:00.000Z",
+    "value": 76.3,
+    "metadata": {
+      "id": "Pump01.Temperature",
+      "equipment": "Pump01",
+      "name": "Temperature",
+      "unit": "°C",
+      "min": 50.2,
+      "max": 79.8,
+      "display_name": "ポンプ01.温度"
+    }
+  },
+  "Pump01.Pressure": {
+    "timestamp": "2023-03-01T12:30:00.000Z",
+    "value": 122.7,
+    "metadata": {
+      "id": "Pump01.Pressure",
+      "equipment": "Pump01",
+      "name": "Pressure",
+      "unit": "kPa",
+      "min": 100.3,
+      "max": 150.7,
+      "display_name": "ポンプ01.圧力"
+    }
+  }
+}
+```
+
+## データ処理 API
+
+### 移動平均の計算
+
+```
+GET /api/process/ma/:tagId
+```
+
+指定したタグの移動平均を計算します。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `tagId` | String | 処理するタグのID |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `window` | Number | 移動平均の窓サイズ（ポイント数） | 5 |
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+
+**リクエスト例:**
+
+```
+GET /api/process/ma/Pump01.Temperature?window=10&display=true
+```
+
+**レスポンス例:**
+
+```json
+{
+  "tagId": "Pump01.Temperature",
+  "metadata": {
+    "id": "Pump01.Temperature",
+    "equipment": "Pump01",
+    "name": "Temperature",
+    "unit": "°C",
+    "min": 50.2,
+    "max": 79.8,
+    "display_name": "ポンプ01.温度"
+  },
+  "processType": "moving_average",
+  "windowSize": 10,
+  "data": [
+    {
+      "timestamp": "2023-01-01T00:00:00.000Z",
+      "value": 75.2,
+      "original": 75.2
+    },
+    {
+      "timestamp": "2023-01-01T00:10:00.000Z",
+      "value": 75.65,
+      "original": 76.1
+    },
+    ...
+  ]
+}
+```
+
+## レスポンス形式
+
+### 成功時レスポンス構造
+
+APIの成功レスポンスはJSON形式で返されます。レスポンスの構造はエンドポイントによって異なりますが、一般的に以下の要素が含まれます：
+
+- メタデータ（タグ情報、タイムスタンプなど）
+- 実際のデータ配列
+
+### エラー時レスポンス構造
+
+エラーが発生した場合、JSONエラーオブジェクトとHTTPエラーステータスコードが返されます：
+
+```json
+{
+  "error": "エラータイプ",
+  "message": "詳細なエラーメッセージ"
+}
+```
+
+一般的なエラーコード:
+
+- `400 Bad Request` - 不正なパラメータまたはリクエスト
+- `404 Not Found` - 指定されたタグまたはリソースが見つからない
+- `500 Internal Server Error` - サーバー内部エラー
+
+## 表示名オプション
+
+DataStream HubはタグIDに対する表示名マッピングをサポートしています。これにより、生のタグID（例: `Pump01.Temperature`）を人間が読みやすい名前（例: `ポンプ01.温度`）に変換できます。
+
+### display パラメータの使用方法
+
+`display=true`をクエリパラメータとして追加すると、APIレスポンスにはタグメタデータ内に`display_name`フィールドが含まれます：
+
+```
+GET /api/data/Pump01.Temperature?display=true
+```
+
+### lang パラメータの使用方法
+
+異なる言語の表示名を取得するには、`lang`パラメータを使用します：
+
+```
+GET /api/data/Pump01.Temperature?display=true&lang=en
+```
+
+サポートされている言語コード:
+- `ja` - 日本語（デフォルト）
+- `en` - 英語
+- その他、必要に応じて追加可能
+
+## 実装例
+
+### Node.js クライアント実装例
+
+```javascript
+// datastream-hub-client.js
+class DataStreamHubClient {
+  constructor(baseUrl = 'http://localhost:3001/api') {
+    this.baseUrl = baseUrl;
+  }
+  
+  async getSystemInfo() {
+    const response = await fetch(`${this.baseUrl}/system/info`);
+    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+    return await response.json();
+  }
+  
+  async getTags(options = {}) {
+    const { display = false, lang = 'ja' } = options;
+    const params = new URLSearchParams();
+    if (display) params.append('display', 'true');
+    if (lang) params.append('lang', lang);
+    
+    const url = `${this.baseUrl}/tags${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+    return await response.json();
+  }
+  
+  async getTagData(tagId, options = {}) {
+    const { start, end, timeshift = false, display = false, lang = 'ja' } = options;
+    
+    const params = new URLSearchParams();
+    if (start) params.append('start', new Date(start).toISOString());
+    if (end) params.append('end', new Date(end).toISOString());
+    if (timeshift) params.append('timeshift', 'true');
+    if (display) params.append('display', 'true');
+    if (lang) params.append('lang', lang);
+    
+    const url = `${this.baseUrl}/data/${tagId}${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Tag ${tagId} not found`);
+      }
+      throw new Error(`API error: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  }
+  
+  async getCurrentValues(tagIds, options = {}) {
+    const { display = false, lang = 'ja' } = options;
+    
+    const params = new URLSearchParams();
+    params.append('tags', Array.isArray(tagIds) ? tagIds.join(',') : tagIds);
+    if (display) params.append('display', 'true');
+    if (lang) params.append('lang', lang);
+    
+    const url = `${this.baseUrl}/current?${params.toString()}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+    
+    return await response.json();
+  }
+  
+  async getMovingAverage(tagId, options = {}) {
+    const { window = 5, start, end, timeshift = false, display = false, lang = 'ja' } = options;
+    
+    const params = new URLSearchParams();
+    params.append('window', window.toString());
+    if (start) params.append('start', new Date(start).toISOString());
+    if (end) params.append('end', new Date(end).toISOString());
+    if (timeshift) params.append('timeshift', 'true');
+    if (display) params.append('display', 'true');
+    if (lang) params.append('lang', lang);
+    
+    const url = `${this.baseUrl}/process/ma/${tagId}?${params.toString()}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Tag ${tagId} not found`);
+      }
+      throw new Error(`API error: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  }
+}
+
+// Node.js環境とブラウザ環境の両方でエクスポート
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = DataStreamHubClient;
+} else {
+  window.DataStreamHubClient = DataStreamHubClient;
+}
+```
+
+### Python クライアント実装例
+
+```python
+# datastream_hub_client.py
+import requests
+from datetime import datetime
+import json
+
+class DataStreamHubClient:
+    def __init__(self, base_url='http://localhost:3001/api'):
+        self.base_url = base_url
+        
+    def get_system_info(self):
+        response = requests.get(f"{self.base_url}/system/info")
+        response.raise_for_status()
+        return response.json()
+    
+    def get_tags(self, display=False, lang='ja'):
+        params = {}
+        if display:
+            params['display'] = 'true'
+        if lang:
+            params['lang'] = lang
+            
+        response = requests.get(f"{self.base_url}/tags", params=params)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_tag_data(self, tag_id, start=None, end=None, timeshift=False, display=False, lang='ja'):
+        params = {}
+        if start:
+            params['start'] = start.isoformat() if isinstance(start, datetime) else start
+        if end:
+            params['end'] = end.isoformat() if isinstance(end, datetime) else end
+        if timeshift:
+            params['timeshift'] = 'true'
+        if display:
+            params['display'] = 'true'
+        if lang:
+            params['lang'] = lang
+            
+        response = requests.get(f"{self.base_url}/data/{tag_id}", params=params)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_current_values(self, tag_ids, display=False, lang='ja'):
+        if isinstance(tag_ids, list):
+            tag_ids = ','.join(tag_ids)
+            
+        params = {
+            'tags': tag_ids
+        }
+        if display:
+            params['display'] = 'true'
+        if lang:
+            params['lang'] = lang
+            
+        response = requests.get(f"{self.base_url}/current", params=params)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_moving_average(self, tag_id, window=5, start=None, end=None, 
+                          timeshift=False, display=False, lang='ja'):
+        params = {
+            'window': window
+        }
+        if start:
+            params['start'] = start.isoformat() if isinstance(start, datetime) else start
+        if end:
+            params['end'] = end.isoformat() if isinstance(end, datetime) else end
+        if timeshift:
+            params['timeshift'] = 'true'
+        if display:
+            params['display'] = 'true'
+        if lang:
+            params['lang'] = lang
+            
+        response = requests.get(f"{self.base_url}/process/ma/{tag_id}", params=params)
+        response.raise_for_status()
+        return response.json()
+```
+
+### curl を使った例
+
+システム情報の取得:
+```bash
+curl http://localhost:3001/api/system/info
+```
+
+タグ一覧の取得（表示名付き）:
+```bash
+curl http://localhost:3001/api/tags?display=true&lang=ja
+```
+
+特定タグのデータ取得:
+```bash
+curl http://localhost:3001/api/data/Pump01.Temperature?start=2023-01-01T00:00:00Z&end=2023-01-02T00:00:00Z&display=true
+```
+
+複数タグの最新値を取得:
+```bash
+curl http://localhost:3001/api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
+```
+
+移動平均の計算:
+```bash
+curl http://localhost:3001/api/process/ma/Pump01.Temperature?window=10&timeshift=true

@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  pi-system-mock:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pi-system-prod
+    ports:
+      - "${EXTERNAL_PORT:-3001}:3000"
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+      - ../package.json:/app/package.json
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}
+      - PI_SYSTEM_API_URL=https://real-pi-system-url/api  # replace this with the real System's URL
+    restart: unless-stopped
