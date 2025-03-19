@@ -221,6 +221,99 @@ CSVからデータを読み込み、SQLiteデータベースに取り込むロ�
 - トランザクション使用によるインサート速度の向上
 - インデックスによる検索速度の最適化
 
+### ファイル監視と動的データ更新
+
+DataStream Hubには、サーバー実行中にCSVファイルの変更を検出して自動的にデータを更新する機能があります：
+
+#### ファイル監視システム（src/utils/file-watcher.js）
+
+```javascript
+// チェックサムベースのファイル変更検出
+function detectChangedFiles() {
+  // CSVファイルのリストを取得し、各ファイルのチェックサムを計算
+  const files = fs.readdirSync(CSV_FOLDER)
+    .filter(file => file.endsWith('.csv'))
+    .map(file => {
+      const filePath = path.join(CSV_FOLDER, file);
+      return {
+        path: filePath,
+        name: file,
+        equipmentId: path.basename(file, '.csv'),
+        checksum: calculateChecksum(filePath)
+      };
+    });
+  
+  // 変更または新規のファイルを特定（チェックサムの比較）
+  const changedFiles = files.filter(file => {
+    const lastChecksum = fileChecksums.get(file.path);
+    return lastChecksum === undefined || lastChecksum !== file.checksum;
+  });
+  
+  // 処理済みファイル情報を更新
+  files.forEach(file => {
+    fileChecksums.set(file.path, file.checksum);
+  });
+  
+  return changedFiles;
+}
+```
+
+- SHA-256ハッシュを使用してファイルの内容に基づくチェックサムを計算
+- チェックサム情報をJSONファイルに永続化し、サーバー再起動間でも保持
+- ファイルの追加、削除、内容変更を正確に検出
+
+#### 特定ファイルの処理（src/utils/csv-importer.js）
+
+```javascript
+async function importSpecificCsvFile(fileInfo) {
+  // ...
+  
+  // 当該設備の既存タグを取得して比較
+  const existingTags = db.prepare('SELECT name FROM tags WHERE equipment = ?').all(equipmentId)
+    .map(tag => tag.name);
+  
+  const newTags = headers.filter(h => h !== timestampColumn);
+  
+  // タグ構成が変わっている場合、当該設備のデータを全削除
+  const tagsChanged = !arraysEqual(existingTags.sort(), newTags.sort());
+  
+  if (tagsChanged) {
+    // 設備に関連するタグIDを取得して削除
+    // ...
+  }
+  
+  // 各タグのデータを処理
+  // ...
+}
+```
+
+- タグ構成の変更を検出し、必要に応じて設備データを再構築
+- 既存タグ構造との比較を行い、最適なインポート戦略を選択
+- `INSERT OR REPLACE`を使用して、同じタイムスタンプのデータポイントを更新
+
+#### 定期的な監視（src/server.js）
+
+```javascript
+// 1分おきにCSVフォルダを監視
+setInterval(async () => {
+  try {
+    const changedFiles = detectChangedFiles();
+    
+    if (changedFiles.length > 0) {
+      for (const fileInfo of changedFiles) {
+        await importSpecificCsvFile(fileInfo);
+      }
+    }
+  } catch (error) {
+    console.error('CSV監視処理中にエラーが発生しました:', error);
+  }
+}, 60000); // 1分間隔
+```
+
+- サーバーの起動時に初期チェックを実行し、変更されたファイルのみをインポート
+- その後、定期的にフォルダを監視して変更を自動検出
+- エラーハンドリングにより、一部のファイルでエラーが発生しても監視プロセスが継続
+
 ### APIエンドポイント実装
 
 APIエンドポイントの基本的な実装パターン：

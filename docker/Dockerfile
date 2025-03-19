@@ -9,7 +9,7 @@ COPY package*.json ./
 RUN npm install
 
 # 必要なディレクトリを作成し、適切な権限を設定
-RUN mkdir -p /app/pi_data /app/logs \
+RUN mkdir -p /app/pi_data /app/logs /app/db \
     && chown -R node:node /app
 
 # ユーザーをnodeに変更（nodeは既にNode.jsイメージに存在する）

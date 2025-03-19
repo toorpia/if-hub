@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  pi-system-mock:
+  datastream-hub:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: pi-system-mock
+    container_name: datastream-hub
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
     volumes:

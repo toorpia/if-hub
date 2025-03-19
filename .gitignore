@@ -6,6 +6,7 @@ jspm_packages/
 dist/
 build/
 db/
+db/file_checksums.json
 
 # Generated data
 pi_data/*.csv

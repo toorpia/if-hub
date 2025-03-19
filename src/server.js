@@ -419,14 +419,34 @@ app.get('/api/process/ma/:tagId', async (req, res) => {
 // サーバー起動
 async function startServer() {
   try {
-    // CSVデータをデータベースにインポート
-    await importCsvToDatabase();
+    // ファイル監視とインポート機能をインポート
+    const { detectChangedFiles, fileChecksums } = require('./utils/file-watcher');
+    const { importSpecificCsvFile } = require('./utils/csv-importer');
+    
+    console.log('CSV変更の確認を開始します...');
+    
+    // 起動時にチェックサムベースで変更ファイルを検出
+    const changedFiles = detectChangedFiles();
+    
+    if (changedFiles.length > 0) {
+      console.log(`${changedFiles.length}個のCSVファイルの変更を検出しました`);
+      
+      for (const fileInfo of changedFiles) {
+        const oldChecksum = fileChecksums.get(fileInfo.path) || '新規ファイル';
+        console.log(`ファイル ${fileInfo.name} の更新を処理します（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
+        await importSpecificCsvFile(fileInfo);
+      }
+      
+      console.log('CSV更新の処理が完了しました');
+    } else {
+      console.log('更新されたCSVファイルはありません。インポートはスキップします。');
+    }
     
     // タグ表示名をインポート
     await importTagTranslations();
     
     app.listen(PORT, () => {
-      console.log(`PI System Mock Server running on port ${PORT}`);
+      console.log(`DataStream Hub Server running on port ${PORT}`);
       console.log(`Environment: ${config.environment}`);
       console.log(`Storage: SQLite database`);
       console.log(`Available endpoints:`);
@@ -439,6 +459,28 @@ async function startServer() {
       console.log(`  GET /api/status`);
       console.log(`  GET /api/process/ma/:tagId`);
     });
+    
+    // 1分おきにCSVフォルダを監視
+    console.log(`CSVフォルダ監視を開始します (間隔: 1分)`);
+    
+    setInterval(async () => {
+      try {
+        const changedFiles = detectChangedFiles();
+        
+        if (changedFiles.length > 0) {
+          console.log(`${changedFiles.length}個のCSVファイルの変更を検出しました`);
+          
+          for (const fileInfo of changedFiles) {
+            console.log(`ファイル ${fileInfo.name} の更新を処理します（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
+            await importSpecificCsvFile(fileInfo);
+          }
+          
+          console.log('CSV更新の処理が完了しました');
+        }
+      } catch (error) {
+        console.error('CSV監視処理中にエラーが発生しました:', error);
+      }
+    }, 60000); // 1分間隔
   } catch (error) {
     console.error('サーバー起動中にエラーが発生しました:', error);
     process.exit(1);
