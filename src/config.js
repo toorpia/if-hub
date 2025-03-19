@@ -12,6 +12,11 @@ module.exports = {
     corsOrigins: process.env.ALLOWED_ORIGINS || '*'
   },
   
+  // API設定
+  api: {
+    maxRecordsPerRequest: parseInt(process.env.MAX_RECORDS_PER_REQUEST || '1000', 10), // 1リクエストあたりの最大レコード数
+  },
+  
   // PI System設定
   piSystem: {
     // 開発環境ではモックを使用、本番環境では実際のエンドポイントを使用

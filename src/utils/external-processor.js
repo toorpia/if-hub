@@ -70,6 +70,104 @@ class ExternalProcessor {
       await fs.remove(tempOutputFile).catch(() => {});
     }
   }
+
+  /**
+   * 外部プロセッサでZ-scoreを計算
+   * @param {Array} data - 処理対象のデータ配列
+   * @param {Object} options - 処理オプション
+   * @returns {Promise<Array>} 処理結果のデータ配列
+   */
+  async calculateZScore(data, options = {}) {
+    const { windowSize = null, timeshift = false } = options;
+    
+    // 一時ファイルパスを生成
+    const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
+    const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+    
+    try {
+      // 入力データをJSONファイルに書き込む
+      await fs.writeJson(tempInputFile, {
+        data,
+        options: {
+          windowSize,
+          timeshift,
+          type: 'zscore'
+        }
+      });
+      
+      // コマンドライン引数を構築
+      const args = [
+        '--input', tempInputFile,
+        '--output', tempOutputFile,
+        '--type', 'zscore'
+      ];
+      
+      if (windowSize) {
+        args.push('--window', windowSize.toString());
+      }
+      
+      // 外部プロセッサを実行
+      await this.runProcess('z_score', args);
+      
+      // 結果を読み込む
+      const result = await fs.readJson(tempOutputFile);
+      
+      return result;
+    } finally {
+      // 一時ファイルを削除
+      await fs.remove(tempInputFile).catch(() => {});
+      await fs.remove(tempOutputFile).catch(() => {});
+    }
+  }
+
+  /**
+   * 外部プロセッサで偏差を計算
+   * @param {Array} data - 処理対象のデータ配列
+   * @param {Object} options - 処理オプション
+   * @returns {Promise<Array>} 処理結果のデータ配列
+   */
+  async calculateDeviation(data, options = {}) {
+    const { windowSize = null, timeshift = false } = options;
+    
+    // 一時ファイルパスを生成
+    const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
+    const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+    
+    try {
+      // 入力データをJSONファイルに書き込む
+      await fs.writeJson(tempInputFile, {
+        data,
+        options: {
+          windowSize,
+          timeshift,
+          type: 'deviation'
+        }
+      });
+      
+      // コマンドライン引数を構築
+      const args = [
+        '--input', tempInputFile,
+        '--output', tempOutputFile,
+        '--type', 'deviation'
+      ];
+      
+      if (windowSize) {
+        args.push('--window', windowSize.toString());
+      }
+      
+      // 外部プロセッサを実行
+      await this.runProcess('z_score', args);
+      
+      // 結果を読み込む
+      const result = await fs.readJson(tempOutputFile);
+      
+      return result;
+    } finally {
+      // 一時ファイルを削除
+      await fs.remove(tempInputFile).catch(() => {});
+      await fs.remove(tempOutputFile).catch(() => {});
+    }
+  }
   
   /**
    * 外部プロセスを実行
