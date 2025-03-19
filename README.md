@@ -67,18 +67,18 @@ DataStream Hubは、上流の産業用データウェアハウス（PI Systemな
 
 ```mermaid
 graph LR
-    Z[産業用データウェアハウス<br/>(PI System等)] -->|データエクスポート| A[設備データCSV]
-    Z -->|API経由<br/>batchwise取得| K[クエリ処理]
-    A[設備データCSV] -->|static_equipment_dataフォルダに配置| B[ファイル監視システム]
+    Z[産業用データウェアハウス] -->|データエクスポート| A[設備データCSV]
+    Z -->|API経由| K[クエリ処理]
+    A -->|static_equipment_dataフォルダに配置| B[ファイル監視システム]
     B -->|変更検出| C[CSVインポーター]
     K -->|データ取得| C
-    C -->|キャッシュ&<br/>データ格納| D[(SQLiteデータベース<br/>一時キャッシュ)]
+    C -->|キャッシュ/データ格納| D[(SQLiteデータベース)]
     D -->|データ取得| E[RESTful API]
     E -->|生データ| F[クライアント/解析サービス]
     E -->|移動平均処理| F
     E -->|Z-score計算| F
     E -->|偏差計算| F
-    E -->|カスタム処理<br/>(外部プロセッサ)| F
+    E -->|カスタム処理| F
     G[タグメタデータCSV] -->|tag_metadataフォルダに配置| H[メタデータインポーター]
     H -->|表示名・単位情報| D
     I[gtag定義] -->|gtagsフォルダに配置| J[gtag処理]
