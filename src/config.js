@@ -30,7 +30,7 @@ module.exports = {
       : 'mock', // 開発環境ではモックデータ
       
     // モックデータフォルダ（ドッカー環境に合わせたパス）
-    mockDataPath: process.env.MOCK_DATA_PATH || '/app/pi_data',
+    mockDataPath: process.env.MOCK_DATA_PATH || '/app/static_equipment_data',
     
     // ログ出力先
     logPath: process.env.LOG_PATH || '/app/logs'

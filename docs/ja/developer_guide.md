@@ -45,8 +45,8 @@ DataStream Hubは、以下のコンポーネントで構成されるモジュラ
    - 静的PIデータファイルの読み込み
    - CSVパースとデータベース取り込み
 
-4. **表示名マッピング**:
-   - `src/utils/tag-translations-importer.js` - 表示名CSVファイルインポート
+4. **タグメタデータ管理**:
+   - `src/utils/tag-metadata-importer.js` - タグメタデータCSVファイルインポート
    - `src/utils/tag-utils.js` - タグメタデータ取得ユーティリティ
 
 5. **外部プロセッサフレームワーク** (`src/utils/external-processor.js`):
@@ -190,8 +190,8 @@ async function startServer() {
     // 1. CSVデータをデータベースにインポート
     await importCsvToDatabase();
     
-    // 2. タグ表示名をインポート
-    await importTagTranslations();
+    // 2. タグメタデータをインポート
+    await importTagMetadata();
     
     // 3. サーバーを起動し、ポートでリッスン開始
     app.listen(PORT, () => {
@@ -210,7 +210,7 @@ async function startServer() {
 
 CSVからデータを読み込み、SQLiteデータベースに取り込むロジックの流れ：
 
-1. `src/utils/csv-importer.js`が`pi_data`ディレクトリからCSVファイルを検索
+1. `src/utils/csv-importer.js`が`static_equipment_data`ディレクトリからCSVファイルを検索
 2. ファイル名からequipmentIDを抽出（例: `Pump01.csv` → `Pump01`）
 3. CSVヘッダーからタグ名を抽出
 4. 各タグのメタデータを`tags`テーブルに登録
@@ -343,9 +343,9 @@ app.get('/api/endpoint', (req, res) => {
 });
 ```
 
-### 表示名マッピング
+### タグメタデータ管理
 
-1. `src/utils/tag-translations-importer.js`がCSVファイルから表示名を読み込む
+1. `src/utils/tag-metadata-importer.js`がCSVファイルからタグメタデータを読み込む
 2. `src/utils/tag-utils.js`の`getTagMetadata()`関数が、タグIDに対する言語別表示名を取得
 
 ```javascript
@@ -557,8 +557,8 @@ function calculateMedian(values) {
      const { param = 1.0 } = options;
      
      // 一時ファイルパスを生成
-     const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
-     const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+     const tempInputFile = path.join(os.tmpdir(), `data_${Date.now()}.json`);
+     const tempOutputFile = path.join(os.tmpdir(), `result_${Date.now()}.json`);
      
      try {
        // 入力データをJSON形式で書き込む
@@ -789,15 +789,15 @@ const setupTestData = async () => {
 2023-01-01 00:10:00,76.1,122.1
 2023-01-01 00:20:00,75.8,121.7`;
 
-  await fs.outputFile('pi_data/TestEquipment.csv', testCsvContent);
+  await fs.outputFile('static_equipment_data/TestEquipment.csv', testCsvContent);
   
-  // テスト用の表示名ファイル作成
+  // テスト用のタグメタデータファイル作成
   const testTranslationContent =
 `tag_id,display_name
 TestEquipment.Temperature,テスト設備.温度
 TestEquipment.Pressure,テスト設備.圧力`;
 
-  await fs.outputFile('translations/translations_test.csv', testTranslationContent);
+  await fs.outputFile('tag_metadata/translations_test.csv', testTranslationContent);
 };
 
 // テスト前の準備
@@ -820,103 +820,3 @@ afterAll(() => {
   server.kill();
   
   // テストファイルを削除
-  fs.removeSync('pi_data/TestEquipment.csv');
-  fs.removeSync('translations/translations_test.csv');
-});
-
-describe('API Endpoints', () => {
-  test('GET /api/system/info should return system info', async () => {
-    const response = await axios.get(`${API_URL}/system/info`);
-    
-    expect(response.status).toBe(200);
-    expect(response.data).toHaveProperty('name');
-    expect(response.data).toHaveProperty('tagCount');
-    expect(response.data).toHaveProperty('equipmentCount');
-  });
-  
-  test('GET /api/tags should return tag list', async () => {
-    const response = await axios.get(`${API_URL}/tags`);
-    
-    expect(response.status).toBe(200);
-    expect(response.data).toHaveProperty('tags');
-    expect(Array.isArray(response.data.tags)).toBe(true);
-    
-    // テストデータのタグが含まれていることを確認
-    const tagIds = response.data.tags.map(tag => tag.id);
-    expect(tagIds).toContain('TestEquipment.Temperature');
-    expect(tagIds).toContain('TestEquipment.Pressure');
-  });
-  
-  test('GET /api/data/:tagId should return tag data', async () => {
-    const response = await axios.get(`${API_URL}/data/TestEquipment.Temperature`);
-    
-    expect(response.status).toBe(200);
-    expect(response.data).toHaveProperty('tagId', 'TestEquipment.Temperature');
-    expect(response.data).toHaveProperty('metadata');
-    expect(response.data).toHaveProperty('data');
-    expect(Array.isArray(response.data.data)).toBe(true);
-    expect(response.data.data.length).toBeGreaterThan(0);
-  });
-  
-  test('GET /api/data/:tagId with display=true should include display_name', async () => {
-    const response = await axios.get(`${API_URL}/data/TestEquipment.Temperature?display=true`);
-    
-    expect(response.status).toBe(200);
-    expect(response.data.metadata).toHaveProperty('display_name', 'テスト設備.温度');
-  });
-});
-```
-
-### パフォーマンステスト
-
-大規模データセットでのパフォーマンス測定方法:
-
-```javascript
-// performance.test.js
-const axios = require('axios');
-const fs = require('fs-extra');
-
-const API_URL = 'http://localhost:3001/api';
-const ITERATIONS = 10;
-
-// 大規模テストデータの生成
-const generateLargeTestData = async () => {
-  let csvContent = 'timestamp';
-  for (let i = 1; i <= 100; i++) {
-    csvContent += `,Tag${i}`;
-  }
-  csvContent += '\n';
-  
-  // 1時間ごとのデータを1年分生成
-  const startDate = new Date('2023-01-01T00:00:00Z');
-  for (let hour = 0; hour < 24 * 365; hour++) {
-    const timestamp = new Date(startDate.getTime() + hour * 60 * 60 * 1000).toISOString().replace('T', ' ').substr(0, 19);
-    csvContent += timestamp;
-    
-    for (let i = 1; i <= 100; i++) {
-      // ランダムなデータ値
-      csvContent += `,${Math.random() * 100}`;
-    }
-    csvContent += '\n';
-    
-    // ファイルサイズが大きくなり過ぎないように一定間隔で書き込む
-    if (hour % 1000 === 0) {
-      await fs.appendFile('pi_data/PerformanceTest.csv', csvContent);
-      csvContent = '';
-    }
-  }
-  
-  if (csvContent) {
-    await fs.appendFile('pi_data/PerformanceTest.csv', csvContent);
-  }
-};
-
-describe('Performance Tests', () => {
-  beforeAll(async () => {
-    // 大規模テストデータを生成
-    await generateLargeTestData();
-    
-    // サーバーを再起動して新しいデータを読み込ませる方法が必要
-    // このテストでは、サーバーがすでに起動していて、新しいデータを読み込むAPIが
-    // 実装されていることを想定
-    await axios.post(`${API_URL}/admin

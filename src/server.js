@@ -7,7 +7,7 @@ const cors = require('cors');
 const config = require('./config');
 const { db } = require('./db');
 const { importCsvToDatabase } = require('./utils/csv-importer');
-const { importTagTranslations } = require('./utils/tag-translations-importer');
+const { importTagMetadata } = require('./utils/tag-metadata-importer');
 const { getTagMetadata, getTagsMetadata } = require('./utils/tag-utils');
 const { 
   initializeGtagSystem, 
@@ -1065,19 +1065,19 @@ async function startServer() {
       console.log('更新されたCSVファイルはありません。インポートはスキップします。');
     }
     
-    // 翻訳ファイルの変更を確認
-    console.log('翻訳ファイル変更の確認を開始します...');
+    // タグメタデータファイルの変更を確認
+    console.log('タグメタデータファイル変更の確認を開始します...');
     const changedTranslationFiles = detectChangedTranslationFiles();
     
     if (changedTranslationFiles.length > 0) {
-      console.log(`${changedTranslationFiles.length}個の翻訳ファイルの変更を検出しました`);
-      // タグ表示名をインポート
-      await importTagTranslations();
-      console.log('翻訳ファイルの更新処理が完了しました');
+      console.log(`${changedTranslationFiles.length}個のタグメタデータファイルの変更を検出しました`);
+      // タグメタデータをインポート
+      await importTagMetadata();
+      console.log('タグメタデータファイルの更新処理が完了しました');
     } else {
-      console.log('更新された翻訳ファイルはありません');
+      console.log('更新されたタグメタデータファイルはありません');
       // それでも初回は読み込む
-      await importTagTranslations();
+      await importTagMetadata();
     }
     
     app.listen(PORT, () => {
@@ -1117,23 +1117,23 @@ async function startServer() {
       }
     }, 60000); // 1分間隔
     
-    // 5分おきに翻訳ファイルを監視
-    console.log(`翻訳ファイル監視を開始します (間隔: 5分)`);
+    // 5分おきにタグメタデータファイルを監視
+    console.log(`タグメタデータファイル監視を開始します (間隔: 5分)`);
     
     setInterval(async () => {
       try {
         const changedTranslationFiles = detectChangedTranslationFiles();
         
         if (changedTranslationFiles.length > 0) {
-          console.log(`${changedTranslationFiles.length}個の翻訳ファイルの変更を検出しました`);
+          console.log(`${changedTranslationFiles.length}個のタグメタデータファイルの変更を検出しました`);
           
-          // タグ表示名をインポート
-          await importTagTranslations();
+          // タグメタデータをインポート
+          await importTagMetadata();
           
-          console.log('翻訳ファイルの更新処理が完了しました');
+          console.log('タグメタデータファイルの更新処理が完了しました');
         }
       } catch (error) {
-        console.error('翻訳ファイル監視処理中にエラーが発生しました:', error);
+        console.error('タグメタデータファイル監視処理中にエラーが発生しました:', error);
       }
     }, 300000); // 5分間隔
     

@@ -1,21 +1,21 @@
-// src/utils/tag-translations-importer.js
+// src/utils/tag-metadata-importer.js
 const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 const { db } = require('../db');
 const config = require('../config');
 
-// タグ表示名ファイルパス
-const TRANSLATIONS_PATH = path.join(process.cwd(), 'translations');
+// タグメタデータファイルパス
+const TRANSLATIONS_PATH = path.join(process.cwd(), 'tag_metadata');
 
 /**
- * タグ表示名をインポート
+ * タグメタデータをインポート
  */
-async function importTagTranslations() {
+async function importTagMetadata() {
   try {
     // ディレクトリが存在するか確認
     if (!fs.existsSync(TRANSLATIONS_PATH)) {
-      console.log(`タグ表示名ディレクトリが見つかりません: ${TRANSLATIONS_PATH}`);
+      console.log(`タグメタデータディレクトリが見つかりません: ${TRANSLATIONS_PATH}`);
       return;
     }
 
@@ -24,11 +24,11 @@ async function importTagTranslations() {
       .filter(file => file.endsWith('.csv') && file.includes('translations'));
     
     if (files.length === 0) {
-      console.log(`タグ表示名ファイルが見つかりません`);
+      console.log(`タグメタデータファイルが見つかりません`);
       return;
     }
 
-    console.log(`${files.length}個のタグ表示名ファイルを見つけました`);
+    console.log(`${files.length}個のタグメタデータファイルを見つけました`);
     
     // トランザクション開始
     db.exec('BEGIN TRANSACTION');
@@ -55,7 +55,7 @@ async function importTagTranslations() {
             .on('error', reject);
         });
         
-        // タグ表示名を挿入
+        // タグメタデータを挿入
         const stmt = db.prepare(`
           INSERT OR REPLACE INTO tag_translations (tag_id, language, display_name, unit)
           VALUES (?, ?, ?, ?)
@@ -73,18 +73,18 @@ async function importTagTranslations() {
           }
         }
         
-        console.log(`  ${counter} 件のタグ表示名を挿入しました（言語: ${language}）`);
+        console.log(`  ${counter} 件のタグメタデータを挿入しました（言語: ${language}）`);
       }
       
       db.exec('COMMIT');
-      console.log('タグ表示名のインポートが完了しました');
+      console.log('タグメタデータのインポートが完了しました');
     } catch (error) {
       db.exec('ROLLBACK');
-      console.error('タグ表示名のインポート中にエラーが発生しました:', error);
+      console.error('タグメタデータのインポート中にエラーが発生しました:', error);
     }
   } catch (error) {
-    console.error('タグ表示名のインポート中にエラーが発生しました:', error);
+    console.error('タグメタデータのインポート中にエラーが発生しました:', error);
   }
 }
 
-module.exports = { importTagTranslations };
+module.exports = { importTagMetadata };

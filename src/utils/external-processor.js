@@ -40,8 +40,8 @@ class ExternalProcessor {
     const { windowSize = 5, timeshift = false } = options;
     
     // 一時ファイルパスを生成
-    const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
-    const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+    const tempInputFile = path.join(os.tmpdir(), `data_${Date.now()}.json`);
+    const tempOutputFile = path.join(os.tmpdir(), `result_${Date.now()}.json`);
     
     try {
       // 入力データをJSONファイルに書き込む
@@ -81,8 +81,8 @@ class ExternalProcessor {
     const { windowSize = null, timeshift = false } = options;
     
     // 一時ファイルパスを生成
-    const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
-    const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+    const tempInputFile = path.join(os.tmpdir(), `data_${Date.now()}.json`);
+    const tempOutputFile = path.join(os.tmpdir(), `result_${Date.now()}.json`);
     
     try {
       // 入力データをJSONファイルに書き込む
@@ -130,8 +130,8 @@ class ExternalProcessor {
     const { windowSize = null, timeshift = false } = options;
     
     // 一時ファイルパスを生成
-    const tempInputFile = path.join(os.tmpdir(), `pi_data_${Date.now()}.json`);
-    const tempOutputFile = path.join(os.tmpdir(), `pi_result_${Date.now()}.json`);
+    const tempInputFile = path.join(os.tmpdir(), `data_${Date.now()}.json`);
+    const tempOutputFile = path.join(os.tmpdir(), `result_${Date.now()}.json`);
     
     try {
       // 入力データをJSONファイルに書き込む

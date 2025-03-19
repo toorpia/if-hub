@@ -10,7 +10,8 @@ services:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
     volumes:
       - ../src:/app/src
-      - ../pi_data:/app/pi_data
+      - ../static_equipment_data:/app/static_equipment_data
+      - ../tag_metadata:/app/tag_metadata
       - ../logs:/app/logs
       - ../db:/app/db  # データベースファイル用のボリューム
       - ../package.json:/app/package.json

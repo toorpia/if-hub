@@ -9,8 +9,8 @@ db/
 db/file_checksums.json
 
 # Generated data
-pi_data/*.csv
-!pi_data/.gitkeep
+static_equipment_data/*.csv
+!static_equipment_data/.gitkeep
 
 # Logs
 logs/
@@ -66,4 +66,4 @@ temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
-translations/translations_ja.csv
+tag_metadata/translations_ja.csv
