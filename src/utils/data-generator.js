@@ -4,7 +4,7 @@ const path = require('path');
 const config = require('../config');
 
 // 設定
-const OUTPUT_DIR = config.piSystem.mockDataPath;
+const OUTPUT_DIR = config.dataSource.staticDataPath;
 const START_DATE = new Date('2023-01-01T00:00:00');
 const END_DATE = new Date('2023-03-31T23:59:59');
 
@@ -139,4 +139,4 @@ EQUIPMENT_CONFIG.forEach(equipment => {
   console.log(`  ${filePath} に ${sortedTimestamps.length} 行のデータを書き込みました`);
 });
 
-console.log('モックデータの生成が完了しました');
+console.log('静的データの生成が完了しました');

@@ -17,20 +17,20 @@ module.exports = {
     maxRecordsPerRequest: parseInt(process.env.MAX_RECORDS_PER_REQUEST || '1000', 10), // 1リクエストあたりの最大レコード数
   },
   
-  // PI System設定
-  piSystem: {
-    // 開発環境ではモックを使用、本番環境では実際のエンドポイントを使用
+  // データソース設定
+  dataSource: {
+    // 開発環境では静的データを使用、本番環境では実際のエンドポイントを使用
     apiUrl: process.env.NODE_ENV === 'production'
-      ? process.env.PI_SYSTEM_API_URL
+      ? process.env.EXTERNAL_API_URL
       : 'http://localhost:3000/api',
     
-    // データソース設定
-    dataSource: process.env.NODE_ENV === 'production'
-      ? 'real'  // 本番環境では実際のPI System
-      : 'mock', // 開発環境ではモックデータ
+    // データソースモード設定
+    mode: process.env.NODE_ENV === 'production'
+      ? 'external'  // 本番環境では外部システム
+      : 'static', // 開発環境では静的データ
       
-    // モックデータフォルダ（Docker環境と非Docker環境の両方に対応）
-    mockDataPath: process.env.MOCK_DATA_PATH || 
+    // 静的データフォルダ（Docker環境と非Docker環境の両方に対応）
+    staticDataPath: process.env.STATIC_DATA_PATH || 
       (process.env.NODE_ENV === 'production' 
         ? '/app/static_equipment_data' 
         : path.join(process.cwd(), 'static_equipment_data')),
@@ -39,7 +39,7 @@ module.exports = {
     logPath: process.env.LOG_PATH || '/app/logs'
   },
   
-  // toor PIA設定
+  // toorPIA設定
   toorPia: {
     // 異常検知設定
     anomalyDetection: {

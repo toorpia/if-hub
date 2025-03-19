@@ -77,7 +77,7 @@ app.get('/api/system/info', (req, res) => {
     const equipmentCount = db.prepare('SELECT COUNT(DISTINCT equipment) as count FROM tags').get().count;
     
     res.json({
-      name: 'Mock PI System',
+      name: 'DataStream Hub',
       version: '1.0.0',
       tagCount,
       equipmentCount,
@@ -1105,7 +1105,7 @@ async function startServer() {
     
     try {
       // CSVフォルダパスを取得
-      const csvPath = config.piSystem.mockDataPath;
+      const csvPath = config.dataSource.staticDataPath;
       console.log(`CSVフォルダパス: ${csvPath}`);
       
       if (fs.existsSync(csvPath)) {

@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const config = require('../config');
 
 // CSVフォルダパス
-const CSV_FOLDER = config.piSystem.mockDataPath;
+const CSV_FOLDER = config.dataSource.staticDataPath;
 // タグメタデータフォルダパス
 const TRANSLATIONS_FOLDER = path.join(process.cwd(), 'tag_metadata');
 

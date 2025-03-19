@@ -335,7 +335,7 @@ Docker環境と非Docker環境の両方で適切に動作するよう、パス�
 
 ```javascript
 // モックデータフォルダのパス設定
-mockDataPath: process.env.MOCK_DATA_PATH || 
+staticDataPath: process.env.STATIC_DATA_PATH || 
   (process.env.NODE_ENV === 'production' 
     ? '/app/static_equipment_data' 
     : path.join(process.cwd(), 'static_equipment_data')),

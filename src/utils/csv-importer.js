@@ -7,7 +7,7 @@ const { db } = require('../db');
 const config = require('../config');
 
 // CSVフォルダパス
-const CSV_FOLDER = config.piSystem.mockDataPath;
+const CSV_FOLDER = config.dataSource.staticDataPath;
 
 // 配列の内容が等しいかを比較
 function arraysEqual(a, b) {

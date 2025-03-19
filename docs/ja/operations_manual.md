@@ -44,7 +44,7 @@ DataStream Hubは以下のコンポーネントで構成されています：
 ### リポジトリのクローン
 
 ```bash
-git clone https://github.com/yourusername/datastream-hub.git
+git clone https://github.com/toorpia/datastream-hub.git
 cd datastream-hub
 ```
 
@@ -92,7 +92,7 @@ DataStream Hubは以下の環境変数をサポートしています：
 | `PORT` | APIサーバーのポート番号 | 3000 |
 | `EXTERNAL_PORT` | Docker使用時の外部公開ポート | 3001 |
 | `ALLOWED_ORIGINS` | CORS許可オリジン | * |
-| `MOCK_DATA_PATH` | モックデータディレクトリのパス | /app/static_equipment_data |
+| `STATIC_DATA_PATH` | 静的データディレクトリのパス | /app/static_equipment_data |
 | `DB_PATH` | データベースファイルのパス | /app/db/datastream_hub.db |
 | `LOG_PATH` | ログファイルのパス | /app/logs |
 

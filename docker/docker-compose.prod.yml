@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  pi-system-mock:
+  datastream-hub:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: pi-system-prod
+    container_name: datastream-hub-prod
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"
     volumes:
@@ -19,5 +19,5 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}
-      - PI_SYSTEM_API_URL=https://real-pi-system-url/api  # replace this with the real System's URL
+      - EXTERNAL_API_URL=https://external-system-url/api  # replace this with the external system's URL
     restart: unless-stopped

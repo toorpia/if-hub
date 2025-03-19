@@ -1,6 +1,6 @@
 # Docker環境でのDataStream Hub実行ガイド
 
-このディレクトリには、DataStream Hub（旧PI System Mock）をDocker環境で実行するための設定ファイルが含まれています。
+このディレクトリには、DataStream HubをDocker環境で実行するための設定ファイルが含まれています。
 
 ## Docker構成ファイル
 
