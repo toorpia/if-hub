@@ -1142,12 +1142,17 @@ async function startServer() {
       console.log(`Available endpoints:`);
       console.log(`  GET /api/system/info`);
       console.log(`  GET /api/tags`);
+      console.log(`  GET /api/tags/sourceTag/:sourceTag`);
+      console.log(`  GET /api/gtags`);
       console.log(`  GET /api/equipment`);
       console.log(`  GET /api/data/:tagId`);
       console.log(`  GET /api/batch`);
       console.log(`  GET /api/current`);
       console.log(`  GET /api/status`);
+      console.log(`  GET /api/export/equipment/:equipmentId/csv`);
       console.log(`  GET /api/process/ma/:tagId`);
+      console.log(`  GET /api/process/zscore/:tagId`);
+      console.log(`  GET /api/process/deviation/:tagId`);
     });
     
     // 1分おきにCSVフォルダを監視

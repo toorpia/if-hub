@@ -19,5 +19,6 @@ services:
       - NODE_ENV=development
       - PORT=3000
       - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
-      - DB_PATH=/app/db/pi_data.db  # データベースファイルのパス
+      - DB_PATH=/app/db/datastream_hub.db  # データベースファイルのパス
     restart: unless-stopped
+    # rootとして実行するため、user設定を削除

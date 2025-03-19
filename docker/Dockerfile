@@ -12,8 +12,8 @@ RUN npm install
 RUN mkdir -p /app/pi_data /app/logs /app/db \
     && chown -R node:node /app
 
-# ユーザーをnodeに変更（nodeは既にNode.jsイメージに存在する）
-USER node
+# ユーザー権限の設定を削除して、rootとして実行できるようにする
+# USER node の行を削除
 
 # ポートをエクスポート
 EXPOSE 3000
