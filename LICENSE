@@ -1,0 +1,31 @@
+# Business-Friendly License (Custom BSL)
+
+## License Overview
+
+This software is provided under the **Business-Friendly License (BFL)**, which is based on the principles of the Business Source License (BSL). 
+
+- **Effective Date:** [2025-03-20]  
+- **Change Date:** 3 years after the release date [2028-03-20]
+- **Change License:** Apache License 2.0  
+
+## Usage Terms
+
+1. **Free for Non-Commercial Use**  
+   - You may use, modify, and distribute this software for non-commercial purposes, such as research, education, and personal projects.  
+
+2. **Commercial Use Restrictions**  
+   - For commercial usage (including deployment in a business environment), you must obtain a commercial license from toor Inc.  
+
+3. **Modification and Distribution**  
+   - Any modification of this software must retain this license until the Change Date.  
+
+4. **Change Date and License Transition**  
+   - On the Change Date, this software will transition to the Apache License 2.0, making it fully open-source and free for commercial use.  
+
+## Disclaimer
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.  
+
+## Contact
+
+For commercial licensing inquiries, please contact: contact@toor.jpn.com
