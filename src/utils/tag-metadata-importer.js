@@ -64,12 +64,24 @@ async function importTagMetadata() {
         let counter = 0;
         for (const row of rows) {
           const tagId = row.tag_id || row.tagId;
+          const sourceTag = row.source_tag || row.sourceTag;
           const displayName = row.display_name || row.displayName;
           const unit = row.unit || '';
           
           if (tagId && displayName) {
+            // 直接タグIDが指定されている場合、単一のレコードを追加
             stmt.run(tagId, language, displayName, unit);
             counter++;
+          } 
+          else if (sourceTag && displayName) {
+            // source_tagから関連するタグIDを検索
+            const relatedTags = db.prepare('SELECT id FROM tags WHERE source_tag = ?').all(sourceTag);
+            
+            // 見つかったすべてのタグIDに対して表示名を適用
+            for (const tag of relatedTags) {
+              stmt.run(tag.id, language, displayName, unit);
+              counter++;
+            }
           }
         }
         

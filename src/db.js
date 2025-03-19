@@ -26,6 +26,7 @@ function initDatabase() {
       id TEXT PRIMARY KEY,
       equipment TEXT NOT NULL,
       name TEXT NOT NULL,
+      source_tag TEXT NOT NULL,
       unit TEXT,
       min REAL,
       max REAL
@@ -58,6 +59,7 @@ function initDatabase() {
   // インデックス作成（検索高速化のため）
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)`);
 
   console.log('データベーステーブルの初期化が完了しました');

@@ -90,6 +90,61 @@ app.get('/api/system/info', (req, res) => {
   }
 });
 
+// ソースタグ名によるタグの検索
+app.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
+  const { sourceTag } = req.params;
+  const { equipment, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  
+  try {
+    let query = 'SELECT * FROM tags WHERE source_tag = ?';
+    const params = [sourceTag];
+    
+    // 設備IDでフィルタリング
+    if (equipment) {
+      query += ' AND equipment = ?';
+      params.push(equipment);
+    }
+    
+    const tags = db.prepare(query).all(...params);
+    
+    if (tags.length === 0) {
+      return res.json({ 
+        sourceTag, 
+        tags: [] 
+      });
+    }
+    
+    // 表示名を追加
+    if (display === 'true') {
+      const tagIds = tags.map(tag => tag.id);
+      const metadataMap = getTagsMetadata(tagIds, {
+        display: true,
+        lang,
+        showUnit: showUnit === 'true'
+      });
+      
+      const tagsWithDisplayNames = tags.map(tag => ({
+        ...tag,
+        display_name: metadataMap[tag.id]?.display_name || tag.name,
+        unit: metadataMap[tag.id]?.unit || tag.unit
+      }));
+      
+      return res.json({
+        sourceTag,
+        tags: tagsWithDisplayNames
+      });
+    }
+    
+    res.json({
+      sourceTag,
+      tags
+    });
+  } catch (error) {
+    console.error('ソースタグによるタグ検索中にエラーが発生しました:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // 利用可能なタグ一覧
 app.get('/api/tags', (req, res) => {
   const { display = 'false', lang = 'ja', showUnit = 'false', equipment, includeGtags = 'true' } = req.query;

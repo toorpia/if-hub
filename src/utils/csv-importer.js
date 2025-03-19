@@ -109,14 +109,15 @@ async function importCsvToDatabase() {
             
             // タグレコードの挿入または更新
             const stmtTag = db.prepare(`
-              INSERT OR REPLACE INTO tags (id, equipment, name, unit, min, max)
-              VALUES (?, ?, ?, ?, ?, ?)
+              INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
             `);
             
             stmtTag.run(
               tagId,
               equipmentId,
               header,
+              header,        // source_tagとして元のタグ名を保存
               guessUnit(header),
               min,
               max
@@ -289,14 +290,15 @@ async function importSpecificCsvFile(fileInfo) {
           
           // タグレコードの挿入または更新
           const stmtTag = db.prepare(`
-            INSERT OR REPLACE INTO tags (id, equipment, name, unit, min, max)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
           `);
           
           stmtTag.run(
             tagId,
             equipmentId,
             header,
+            header,        // source_tagとして元のタグ名を保存
             guessUnit(header),
             min,
             max
