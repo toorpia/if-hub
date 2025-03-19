@@ -784,6 +784,166 @@ app.get('/api/process/deviation/:tagId', async (req, res) => {
   }
 });
 
+// 設備のCSVデータエクスポート
+app.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
+  const { equipmentId } = req.params;
+  const { 
+    start, 
+    end, 
+    includeGtags = 'true', 
+    timeshift = 'false',
+    display = 'false',
+    lang = 'ja',
+    showUnit = 'false'
+  } = req.query;
+  
+  try {
+    // 設備の存在チェック
+    const equipmentExists = db.prepare(
+      'SELECT COUNT(*) as count FROM tags WHERE equipment = ?'
+    ).get(equipmentId).count > 0;
+    
+    if (!equipmentExists) {
+      return res.status(404).json({ error: `Equipment ${equipmentId} not found` });
+    }
+    
+    // 設備に関連する通常タグを取得してソート
+    const tags = db.prepare('SELECT id FROM tags WHERE equipment = ? ORDER BY id').all(equipmentId);
+    const normalTagIds = tags.map(tag => tag.id);
+    
+    // gtagを含める場合、IDでソートして取得
+    const shouldIncludeGtags = includeGtags === 'true';
+    let gtagIds = [];
+    if (shouldIncludeGtags) {
+      const gtags = db.prepare('SELECT id FROM gtags WHERE equipment = ? ORDER BY id').all(equipmentId);
+      gtagIds = gtags.map(gtag => gtag.id);
+    }
+    
+    // 全タグIDを配列にまとめる（通常タグが先、gtagが後）
+    const allTagIds = [...normalTagIds, ...gtagIds];
+    
+    if (allTagIds.length === 0) {
+      return res.status(404).json({ error: `No tags found for equipment ${equipmentId}` });
+    }
+    
+    // 表示名オプションの処理
+    const shouldDisplay = display === 'true';
+    const shouldShowUnit = showUnit === 'true';
+    
+    // ヘッダー名を取得
+    let headerNames = [...allTagIds]; // デフォルトはタグID
+    
+    if (shouldDisplay) {
+      // 通常タグのメタデータを取得
+      const metadataMap = getTagsMetadata(normalTagIds, {
+        display: true,
+        lang,
+        showUnit: shouldShowUnit
+      });
+      
+      // gtag表示名の取得
+      const gtagHeaderMap = {};
+      if (shouldIncludeGtags && gtagIds.length > 0) {
+        for (const gtagId of gtagIds) {
+          const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(gtagId);
+          let displayName = gtag.description || gtag.name;
+          if (shouldShowUnit && gtag.unit) {
+            displayName = `${displayName} (${gtag.unit})`;
+          }
+          gtagHeaderMap[gtagId] = displayName;
+        }
+      }
+      
+      // ヘッダー名を表示名に置き換え
+      headerNames = allTagIds.map(tagId => {
+        if (gtagIds.includes(tagId)) {
+          // gtagの場合
+          return gtagHeaderMap[tagId] || tagId;
+        } else {
+          // 通常タグの場合
+          return metadataMap[tagId]?.display_name || tagId;
+        }
+      });
+    }
+    
+    // CSVヘッダーの生成（1列目はdatetime、2列目以降は各タグの名前）
+    const csvHeader = ['datetime', ...headerNames].join(',');
+    
+    // データポイントのタイムスタンプを収集
+    const timestamps = new Set();
+    const tagData = {};
+    
+    // 各タグのデータを取得し、タイムスタンプを収集
+    for (const tagId of allTagIds) {
+      // gtagかどうかチェック
+      const isGtag = gtagIds.includes(tagId);
+      
+      let data;
+      if (isGtag) {
+        // gtagの場合
+        const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
+        data = await getGtagData(gtag, { start, end });
+      } else {
+        // 通常タグの場合
+        let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+        const params = [tagId];
+        
+        if (start) {
+          query += ' AND timestamp >= ?';
+          params.push(new Date(start).toISOString());
+        }
+        
+        if (end) {
+          query += ' AND timestamp <= ?';
+          params.push(new Date(end).toISOString());
+        }
+        
+        query += ' ORDER BY timestamp';
+        data = db.prepare(query).all(...params);
+      }
+      
+      // タイムシフトを適用
+      if (timeshift === 'true') {
+        data = getTimeShiftedData(data, true);
+      }
+      
+      // タグのデータを保存
+      tagData[tagId] = {};
+      data.forEach(point => {
+        timestamps.add(point.timestamp);
+        tagData[tagId][point.timestamp] = point.value;
+      });
+    }
+    
+    // 時系列順にソート
+    const sortedTimestamps = Array.from(timestamps).sort();
+    
+    // CSVレコードの生成
+    const csvRows = sortedTimestamps.map(timestamp => {
+      const values = allTagIds.map(tagId => {
+        const value = tagData[tagId][timestamp];
+        return value !== undefined ? value : '';
+      });
+      return [timestamp, ...values].join(',');
+    });
+    
+    // CSVデータの生成
+    const csvContent = [csvHeader, ...csvRows].join('\n');
+    
+    // 現在のタイムスタンプをファイル名に使用
+    const currentTime = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `${equipmentId}_data_${currentTime}.csv`;
+    
+    // CSVレスポンスの送信
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('CSVエクスポート中にエラーが発生しました:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
 // 移動平均データの取得エンドポイント
 app.get('/api/process/ma/:tagId', async (req, res) => {
   const { tagId } = req.params;

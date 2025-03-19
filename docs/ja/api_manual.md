@@ -989,6 +989,75 @@ class DataStreamHubClient:
         return response.json()
 ```
 
+### 設備のCSVデータエクスポート
+
+```
+GET /api/export/equipment/:equipmentId/csv
+```
+
+特定の設備に関連する全タグのデータをCSV形式でエクスポートします。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `equipmentId` | String | エクスポートする設備のID |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (最新データまで) |
+| `includeGtags` | Boolean | 計算生成タグ(gtag)を含めるかどうか | true |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするかどうか | false |
+| `display` | Boolean | カラム名にタグの表示名を使用するかどうか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+
+**レスポンスヘッダー:**
+
+```
+Content-Type: text/csv
+Content-Disposition: attachment; filename={equipmentId}_data_{timestamp}.csv
+```
+
+**CSVフォーマット:**
+
+- 1列目: `datetime` - データポイントのタイムスタンプ (ISO 8601形式)
+- 2列目以降: 設備に関連する通常タグ（ID順にソート）
+- 最後尾: 設備に関連するgtag（ID順にソート、`includeGtags=true`の場合のみ）
+
+**カラム名の形式:**
+
+- `display=false`の場合: タグID (例: `Pump01.Temperature`)
+- `display=true`の場合: タグの表示名 (例: `ポンプ01.温度`)
+- `display=true&showUnit=true`の場合: 単位付き表示名 (例: `ポンプ01.温度 (°C)`)
+
+**リクエスト例:**
+
+```
+GET /api/export/equipment/Pump01/csv?start=2023-01-01T00:00:00Z&display=true&lang=ja&showUnit=true
+```
+
+**レスポンス例 (display=false):**
+
+```csv
+datetime,Pump01.Flow,Pump01.Pressure,Pump01.Temperature,Pump01.EfficiencyIndex
+2023-01-01T00:00:00.000Z,15.3,120.5,75.2,12.7
+2023-01-01T00:10:00.000Z,15.5,121.7,76.1,12.7
+...
+```
+
+**レスポンス例 (display=true&showUnit=true, 日本語):**
+
+```csv
+datetime,ポンプ01.流量 (L/min),ポンプ01.圧力 (kPa),ポンプ01.温度 (°C),ポンプ01.効率指標 (%)
+2023-01-01T00:00:00.000Z,15.3,120.5,75.2,12.7
+2023-01-01T00:10:00.000Z,15.5,121.7,76.1,12.7
+...
+```
+
 ### curl を使った例
 
 システム情報の取得:
@@ -1009,6 +1078,11 @@ curl http://localhost:3001/api/data/Pump01.Temperature?start=2023-01-01T00:00:00
 複数タグの最新値を取得:
 ```bash
 curl http://localhost:3001/api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
+```
+
+設備のCSVデータをエクスポート:
+```bash
+curl -o pump01_data.csv "http://localhost:3001/api/export/equipment/Pump01/csv?start=2023-01-01T00:00:00Z&display=true"
 ```
 
 移動平均の計算:
