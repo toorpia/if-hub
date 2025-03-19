@@ -6,7 +6,7 @@ DataStream Hubは、製造設備の時系列データを安全かつ柔軟に管
 
 また、Python、Rust、Go、C/C++など、各種言語で作成された外部プログラムを取り込むことが可能で、高度なデータ処理を柔軟に拡張できます。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## 存在価値と使命
 
@@ -194,7 +194,7 @@ DataStream Hubは継続的に進化するプロジェクトであり、以下の
 
 ## ライセンス
 
-このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。商用利用を含め、自由に活用いただけます。
+このプロジェクトは[Apache 2.0ライセンス](https://www.apache.org/licenses/LICENSE-2.0)の下で公開されています。著作権表示を明示する必要があり、また改変を行った場合はその旨を通知する義務があります。商用利用を含め、これらの条件を満たせば自由に活用いただけます。
 
 ## 貢献
 
