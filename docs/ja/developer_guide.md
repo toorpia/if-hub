@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS tags (
   id TEXT PRIMARY KEY,
   equipment TEXT NOT NULL,
   name TEXT NOT NULL,
+  source_tag TEXT NOT NULL,
   unit TEXT,
   min REAL,
   max REAL
@@ -95,6 +96,7 @@ CREATE TABLE IF NOT EXISTS tags (
 | id | TEXT | タグの一意識別子（例: `Pump01.Temperature`）|
 | equipment | TEXT | 設備名（例: `Pump01`）|
 | name | TEXT | タグ名（例: `Temperature`）|
+| source_tag | TEXT | 元のCSVカラム名（例: `Temperature`）|
 | unit | TEXT | 単位（例: `°C`）|
 | min | REAL | データの最小値 |
 | max | REAL | データの最大値 |
@@ -144,6 +146,7 @@ CREATE TABLE IF NOT EXISTS tag_translations (
 ```sql
 CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)
 CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)
+CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)
 CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)
 ```
 
@@ -212,14 +215,41 @@ CSVからデータを読み込み、SQLiteデータベースに取り込むロ�
 
 1. `src/utils/csv-importer.js`が`static_equipment_data`ディレクトリからCSVファイルを検索
 2. ファイル名からequipmentIDを抽出（例: `Pump01.csv` → `Pump01`）
-3. CSVヘッダーからタグ名を抽出
-4. 各タグのメタデータを`tags`テーブルに登録
+3. CSVヘッダーからタグ名（source_tag）を抽出
+4. 各タグのメタデータを`tags`テーブルに登録（tagsテーブルのsource_tagカラムにソースタグ名を保存）
 5. 各データポイントを`tag_data`テーブルに登録
 
 重要な最適化：
 - チャンク処理によるメモリ効率の向上
 - トランザクション使用によるインサート速度の向上
 - インデックスによる検索速度の最適化
+
+### タグIDとソースタグの関係
+
+DataStream Hubでは、タグには2つの識別子があります：
+
+1. **タグID**: `{設備名}.{タグ名}`という形式のシステム内での一意識別子（例：`Pump01.Temperature`）
+2. **ソースタグ（source_tag）**: CSVファイルの元のカラム名（例：`Temperature`）
+
+この関係は以下のように実装されています：
+
+```javascript
+// CSVインポート時のタグ登録処理
+const tagId = `${equipmentId}.${header}`;
+const sourceTag = header;
+
+stmtTag.run(
+  tagId,
+  equipmentId,
+  header,          // name列
+  sourceTag,       // source_tag列
+  guessUnit(header),
+  min,
+  max
+);
+```
+
+この実装により、同じソースタグ（例：`Temperature`）を持つ異なる設備の同種センサーを一括で管理できます。
 
 ### ファイル監視と動的データ更新
 
@@ -314,6 +344,93 @@ setInterval(async () => {
 - その後、定期的にフォルダを監視して変更を自動検出
 - エラーハンドリングにより、一部のファイルでエラーが発生しても監視プロセスが継続
 
+### タグメタデータ管理
+
+DataStream Hubは、タグ表示名を管理するために柔軟なメタデータシステムを提供しています。
+
+#### タグメタデータのインポート（src/utils/tag-metadata-importer.js）
+
+```javascript
+async function importTagMetadata() {
+  // ...
+  
+  for (const row of rows) {
+    const tagId = row.tag_id || row.tagId;
+    const sourceTag = row.source_tag || row.sourceTag;
+    const displayName = row.display_name || row.displayName;
+    const unit = row.unit || '';
+    
+    if (tagId && displayName) {
+      // 直接タグIDが指定されている場合、単一のレコードを追加
+      stmt.run(tagId, language, displayName, unit);
+      counter++;
+    } 
+    else if (sourceTag && displayName) {
+      // source_tagから関連するタグIDを検索
+      const relatedTags = db.prepare('SELECT id FROM tags WHERE source_tag = ?').all(sourceTag);
+      
+      // 見つかったすべてのタグIDに対して表示名を適用
+      for (const tag of relatedTags) {
+        stmt.run(tag.id, language, displayName, unit);
+        counter++;
+      }
+    }
+  }
+}
+```
+
+この実装により、以下の2つの方法でタグメタデータを定義できます：
+
+1. **タグID指定方式**:
+   - `tag_id`（例：`Pump01.Temperature`）を直接指定
+   - 特定の設備とタグの組み合わせに対してカスタム表示名を設定
+
+2. **ソースタグ指定方式**:
+   - `source_tag`（例：`Temperature`）を指定
+   - 同じソースタグを持つすべてのタグに対して同一の表示名を一括で適用
+   - 新しい設備が追加された場合でも、既存の翻訳が自動的に適用される
+
+#### タグメタデータの取得（src/utils/tag-utils.js）
+
+```javascript
+function getTagMetadata(tagId, options = {}) {
+  const { display = false, lang = 'ja' } = options;
+  
+  // タグメタデータを取得
+  const metadata = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId);
+  
+  // 表示名が不要な場合はそのまま返す
+  if (!metadata || !display) {
+    return metadata;
+  }
+  
+  // 表示名を取得
+  const translation = db.prepare(
+    'SELECT display_name FROM tag_translations WHERE tag_id = ? AND language = ?'
+  ).get(tagId, lang);
+  
+  // ...省略...
+  
+  return {
+    ...metadata,
+    display_name: translation ? translation.display_name : metadata.name
+  };
+}
+
+// ソースタグでタグを検索する関数（新機能）
+function findTagsBySourceTag(sourceTag, equipment = null) {
+  let query = 'SELECT id, equipment, name, source_tag FROM tags WHERE source_tag = ?';
+  const params = [sourceTag];
+  
+  if (equipment) {
+    query += ' AND equipment = ?';
+    params.push(equipment);
+  }
+  
+  return db.prepare(query).all(...params);
+}
+```
+
 ### APIエンドポイント実装
 
 APIエンドポイントの基本的な実装パターン：
@@ -343,78 +460,63 @@ app.get('/api/endpoint', (req, res) => {
 });
 ```
 
-### タグメタデータ管理
-
-1. `src/utils/tag-metadata-importer.js`がCSVファイルからタグメタデータを読み込む
-2. `src/utils/tag-utils.js`の`getTagMetadata()`関数が、タグIDに対する言語別表示名を取得
+#### ソースタグ検索エンドポイント（src/server.js）
 
 ```javascript
-function getTagMetadata(tagId, options = {}) {
-  const { display = false, lang = 'ja' } = options;
+// ソースタグ名によるタグの検索
+app.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
+  const { sourceTag } = req.params;
+  const { equipment, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
-  // タグメタデータを取得
-  const metadata = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId);
-  
-  // 表示名が不要な場合はそのまま返す
-  if (!metadata || !display) {
-    return metadata;
+  try {
+    let query = 'SELECT * FROM tags WHERE source_tag = ?';
+    const params = [sourceTag];
+    
+    // 設備IDでフィルタリング
+    if (equipment) {
+      query += ' AND equipment = ?';
+      params.push(equipment);
+    }
+    
+    const tags = db.prepare(query).all(...params);
+    
+    if (tags.length === 0) {
+      return res.json({ 
+        sourceTag, 
+        tags: [] 
+      });
+    }
+    
+    // 表示名を追加
+    if (display === 'true') {
+      const tagIds = tags.map(tag => tag.id);
+      const metadataMap = getTagsMetadata(tagIds, {
+        display: true,
+        lang,
+        showUnit: showUnit === 'true'
+      });
+      
+      const tagsWithDisplayNames = tags.map(tag => ({
+        ...tag,
+        display_name: metadataMap[tag.id]?.display_name || tag.name,
+        unit: metadataMap[tag.id]?.unit || tag.unit
+      }));
+      
+      return res.json({
+        sourceTag,
+        tags: tagsWithDisplayNames
+      });
+    }
+    
+    res.json({
+      sourceTag,
+      tags
+    });
+  } catch (error) {
+    console.error('ソースタグによるタグ検索中にエラーが発生しました:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  
-  // 表示名を取得
-  const translation = db.prepare(
-    'SELECT display_name FROM tag_translations WHERE tag_id = ? AND language = ?'
-  ).get(tagId, lang);
-  
-  // ...省略...
-  
-  return {
-    ...metadata,
-    display_name: translation ? translation.display_name : metadata.name
-  };
-}
-```
-
-### 外部プロセッサ連携
-
-`src/utils/external-processor.js`が子プロセスとの通信を処理します：
-
-1. 一時ファイルにデータをJSON形式で書き込み
-2. 子プロセスを`spawn()`で起動し、ファイルパスを引数として渡す
-3. 子プロセスの標準出力と標準エラー出力を監視
-4. 子プロセスが終了したら結果の一時ファイルを読み込み
-5. すべての一時ファイルを削除
-
-```javascript
-async runProcess(processor, args) {
-  return new Promise((resolve, reject) => {
-    // プロセスを起動
-    const proc = spawn(PROCESSOR_RUNNER, [processor, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    // 標準出力を収集
-    proc.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-    
-    // 標準エラー出力を収集
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-    
-    // プロセス終了時のハンドリング
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`外部プロセッサエラー: ${stderr}`));
-      }
-    });
-  });
-}
+});
 ```
 
 ## 拡張方法
@@ -654,6 +756,81 @@ function calculateMedian(values) {
      }
    });
    ```
+
+### ソースタグ検索機能の拡張
+
+ソースタグに関連する追加機能の実装例：
+
+```javascript
+// ソースタグによるデータの一括取得
+app.get('/api/data/sourceTag/:sourceTag', async (req, res) => {
+  const { sourceTag } = req.params;
+  const { 
+    equipment, 
+    start, 
+    end, 
+    timeshift = 'false',
+    display = 'false', 
+    lang = 'ja'
+  } = req.query;
+  
+  try {
+    // ソースタグを持つタグを検索
+    let query = 'SELECT id FROM tags WHERE source_tag = ?';
+    const params = [sourceTag];
+    
+    if (equipment) {
+      query += ' AND equipment = ?';
+      params.push(equipment);
+    }
+    
+    const tags = db.prepare(query).all(...params);
+    
+    if (tags.length === 0) {
+      return res.json({
+        sourceTag,
+        tags: [],
+        data: {}
+      });
+    }
+    
+    const tagIds = tags.map(tag => tag.id);
+    const result = {};
+    
+    // 各タグのデータを取得
+    for (const tagId of tagIds) {
+      // データ取得クエリ
+      let dataQuery = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+      const dataParams = [tagId];
+      
+      if (start) {
+        dataQuery += ' AND timestamp >= ?';
+        dataParams.push(new Date(start).toISOString());
+      }
+      
+      if (end) {
+        dataQuery += ' AND timestamp <= ?';
+        dataParams.push(new Date(end).toISOString());
+      }
+      
+      dataQuery += ' ORDER BY timestamp';
+      
+      // タグデータを取得
+      const tagData = db.prepare(dataQuery).all(...dataParams);
+      
+      // タイムシフトが必要な場合
+      const processedData = timeshift === 'true' 
+        ? getTimeShiftedData(tagData, true) 
+        : tagData;
+      
+      // メタデータを取得
+      const metadata = getTagMetadata(tagId, {
+        display: display === 'true',
+        lang
+      });
+      
+      result[tagId] = {
+        metadata,
 
 ### パフォーマンスチューニング
 

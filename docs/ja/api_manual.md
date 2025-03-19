@@ -130,12 +130,62 @@ GET /api/tags
       "id": "Pump01.Temperature",
       "equipment": "Pump01",
       "name": "Temperature",
+      "source_tag": "Temperature",
       "unit": "°C",
       "min": 50.2,
       "max": 79.8,
       "display_name": "Temperature"
     },
     ...
+  ]
+}
+```
+
+### ソースタグによるタグ検索
+
+```
+GET /api/tags/sourceTag/:sourceTag
+```
+
+元のCSVタグ名（ソースタグ）を使用してタグを検索します。このエンドポイントを利用すると、異なる設備間で同じソースタグ名を持つタグをまとめて取得できます。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `sourceTag` | String | 検索するソースタグ名（例: "Temperature"） |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `equipment` | String | 特定の設備のタグのみに絞り込み | なし（全設備） |
+| `display` | Boolean | タグの表示名を含めるかどうか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+
+**レスポンス例:**
+
+```json
+{
+  "sourceTag": "Temperature",
+  "tags": [
+    {
+      "id": "Pump01.Temperature",
+      "equipment": "Pump01",
+      "name": "Temperature",
+      "source_tag": "Temperature",
+      "unit": "°C",
+      "display_name": "ポンプ01.温度"
+    },
+    {
+      "id": "Pump02.Temperature",
+      "equipment": "Pump02",
+      "name": "Temperature",
+      "source_tag": "Temperature",
+      "unit": "°C",
+      "display_name": "ポンプ02.温度"
+    }
   ]
 }
 ```
@@ -186,6 +236,7 @@ GET /api/equipment
           "id": "Pump01.Temperature",
           "equipment": "Pump01",
           "name": "Temperature",
+          "source_tag": "Temperature",
           "unit": "°C",
           "min": 50.2,
           "max": 79.8
@@ -194,6 +245,7 @@ GET /api/equipment
           "id": "Pump01.Pressure",
           "equipment": "Pump01",
           "name": "Pressure",
+          "source_tag": "Pressure",
           "unit": "kPa",
           "min": 100.3,
           "max": 150.7
@@ -240,6 +292,7 @@ GET /api/data/:tagId
     "id": "Pump01.Temperature",
     "equipment": "Pump01",
     "name": "Temperature",
+    "source_tag": "Temperature",
     "unit": "°C",
     "min": 50.2,
     "max": 79.8,
@@ -294,6 +347,7 @@ GET /api/batch?tags=Pump01.Temperature,Pump01.Pressure&timeshift=true&display=tr
       "id": "Pump01.Temperature",
       "equipment": "Pump01",
       "name": "Temperature",
+      "source_tag": "Temperature",
       "unit": "°C",
       "min": 50.2,
       "max": 79.8,
@@ -312,6 +366,7 @@ GET /api/batch?tags=Pump01.Temperature,Pump01.Pressure&timeshift=true&display=tr
       "id": "Pump01.Pressure",
       "equipment": "Pump01",
       "name": "Pressure",
+      "source_tag": "Pressure",
       "unit": "kPa",
       "min": 100.3,
       "max": 150.7,
@@ -362,6 +417,7 @@ GET /api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
       "id": "Pump01.Temperature",
       "equipment": "Pump01",
       "name": "Temperature",
+      "source_tag": "Temperature",
       "unit": "°C",
       "min": 50.2,
       "max": 79.8,
@@ -375,6 +431,7 @@ GET /api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
       "id": "Pump01.Pressure",
       "equipment": "Pump01",
       "name": "Pressure",
+      "source_tag": "Pressure",
       "unit": "kPa",
       "min": 100.3,
       "max": 150.7,
@@ -427,6 +484,7 @@ GET /api/process/ma/Pump01.Temperature?window=10&display=true
     "id": "Pump01.Temperature",
     "equipment": "Pump01",
     "name": "Temperature",
+    "source_tag": "Temperature",
     "unit": "°C",
     "min": 50.2,
     "max": 79.8,
@@ -491,6 +549,7 @@ GET /api/process/zscore/Pump01.Temperature?window=10&display=true
     "id": "Pump01.Temperature",
     "equipment": "Pump01",
     "name": "Temperature",
+    "source_tag": "Temperature",
     "unit": "°C",
     "min": 50.2,
     "max": 79.8,
@@ -559,6 +618,7 @@ GET /api/process/deviation/Pump01.Temperature?window=10&display=true
     "id": "Pump01.Temperature",
     "equipment": "Pump01",
     "name": "Temperature",
+    "source_tag": "Temperature",
     "unit": "°C",
     "min": 50.2,
     "max": 79.8,
