@@ -8,7 +8,8 @@
 4. [データ処理 API](#データ処理-api)
 5. [レスポンス形式](#レスポンス形式)
 6. [表示名オプション](#表示名オプション)
-7. [実装例](#実装例)
+7. [システム運用機能](#システム運用機能)
+8. [実装例](#実装例)
 
 ## API概要
 
@@ -398,6 +399,140 @@ GET /api/process/ma/Pump01.Temperature?window=10&display=true
       "timestamp": "2023-01-01T00:10:00.000Z",
       "value": 75.65,
       "original": 76.1
+    },
+    ...
+  ]
+}
+```
+
+### Z-scoreの計算
+
+```
+GET /api/process/zscore/:tagId
+```
+
+指定したタグのZ-score（標準化スコア）を計算します。Z-scoreは、データポイントが平均からどれだけ標準偏差離れているかを示す値です。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `tagId` | String | 処理するタグのID |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `window` | Number | 移動ウィンドウのサイズ（ポイント数）、指定なしの場合は全期間で計算 | null |
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+
+**リクエスト例:**
+
+```
+GET /api/process/zscore/Pump01.Temperature?window=10&display=true
+```
+
+**レスポンス例:**
+
+```json
+{
+  "tagId": "Pump01.Temperature",
+  "metadata": {
+    "id": "Pump01.Temperature",
+    "equipment": "Pump01",
+    "name": "Temperature",
+    "unit": "°C",
+    "min": 50.2,
+    "max": 79.8,
+    "display_name": "ポンプ01.温度"
+  },
+  "processType": "zscore",
+  "windowSize": 10,
+  "data": [
+    {
+      "timestamp": "2023-01-01T00:00:00.000Z",
+      "value": 0.2,
+      "original": 75.2,
+      "mean": 74.5,
+      "std": 3.5
+    },
+    {
+      "timestamp": "2023-01-01T00:10:00.000Z",
+      "value": 0.8,
+      "original": 76.1,
+      "mean": 74.8,
+      "std": 3.6
+    },
+    ...
+  ]
+}
+```
+
+### 偏差の計算
+
+```
+GET /api/process/deviation/:tagId
+```
+
+指定したタグの偏差（平均からの差）を計算します。
+
+**パスパラメータ:**
+
+| パラメータ | 型 | 説明 |
+|----------|------|-------------|
+| `tagId` | String | 処理するタグのID |
+
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `window` | Number | 移動ウィンドウのサイズ（ポイント数）、指定なしの場合は全期間で計算 | null |
+| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
+| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
+| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
+| `display` | Boolean | タグの表示名を含めるか | false |
+| `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+
+**リクエスト例:**
+
+```
+GET /api/process/deviation/Pump01.Temperature?window=10&display=true
+```
+
+**レスポンス例:**
+
+```json
+{
+  "tagId": "Pump01.Temperature",
+  "metadata": {
+    "id": "Pump01.Temperature",
+    "equipment": "Pump01",
+    "name": "Temperature",
+    "unit": "°C",
+    "min": 50.2,
+    "max": 79.8,
+    "display_name": "ポンプ01.温度"
+  },
+  "processType": "deviation",
+  "windowSize": 10,
+  "data": [
+    {
+      "timestamp": "2023-01-01T00:00:00.000Z",
+      "value": 0.7,
+      "original": 75.2,
+      "mean": 74.5
+    },
+    {
+      "timestamp": "2023-01-01T00:10:00.000Z",
+      "value": 1.3,
+      "original": 76.1,
+      "mean": 74.8
     },
     ...
   ]
