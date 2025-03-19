@@ -6,9 +6,13 @@ const config = require('../config');
 
 // CSVフォルダパス
 const CSV_FOLDER = config.piSystem.mockDataPath;
+// 翻訳ファイルフォルダパス
+const TRANSLATIONS_FOLDER = path.join(process.cwd(), 'translations');
 
 // チェックサム情報を保存するファイルパス
 const CHECKSUM_STORE_PATH = path.join(process.cwd(), 'db', 'file_checksums.json');
+// 翻訳ファイル用チェックサム情報を保存するファイルパス
+const TRANSLATION_CHECKSUM_STORE_PATH = path.join(process.cwd(), 'db', 'translation_checksums.json');
 
 // チェックサムデータの保存先ディレクトリを確保
 function ensureChecksumDirectory() {
@@ -19,23 +23,23 @@ function ensureChecksumDirectory() {
 }
 
 // チェックサム情報をファイルに保存
-function saveChecksums(checksums) {
+function saveChecksums(checksums, filePath) {
   try {
     ensureChecksumDirectory();
     const data = Object.fromEntries(checksums);
-    fs.writeFileSync(CHECKSUM_STORE_PATH, JSON.stringify(data, null, 2));
-    console.log(`チェックサム情報をファイルに保存しました: ${CHECKSUM_STORE_PATH}`);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    console.log(`チェックサム情報をファイルに保存しました: ${filePath}`);
   } catch (error) {
     console.error('チェックサム情報の保存中にエラーが発生しました:', error);
   }
 }
 
 // チェックサム情報をファイルから読み込み
-function loadChecksums() {
+function loadChecksums(filePath) {
   try {
-    if (fs.existsSync(CHECKSUM_STORE_PATH)) {
-      const data = JSON.parse(fs.readFileSync(CHECKSUM_STORE_PATH, 'utf8'));
-      console.log(`チェックサム情報をファイルから読み込みました: ${CHECKSUM_STORE_PATH}`);
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      console.log(`チェックサム情報をファイルから読み込みました: ${filePath}`);
       return new Map(Object.entries(data));
     }
   } catch (error) {
@@ -44,8 +48,11 @@ function loadChecksums() {
   return new Map();
 }
 
-// チェックサムマップ（ファイルパス -> チェックサム値）
-const fileChecksums = loadChecksums();
+// CSVファイル用チェックサムマップ（ファイルパス -> チェックサム値）
+const fileChecksums = loadChecksums(CHECKSUM_STORE_PATH);
+
+// 翻訳ファイル用チェックサムマップ（ファイルパス -> チェックサム値）
+const translationChecksums = loadChecksums(TRANSLATION_CHECKSUM_STORE_PATH);
 
 /**
  * ファイルのチェックサムを計算
@@ -110,7 +117,7 @@ function detectChangedFiles() {
     });
     
     // 更新されたチェックサム情報を保存
-    saveChecksums(fileChecksums);
+    saveChecksums(fileChecksums, CHECKSUM_STORE_PATH);
     
     return changedFiles;
   } catch (error) {
@@ -119,17 +126,73 @@ function detectChangedFiles() {
   }
 }
 
+/**
+ * 翻訳ファイルの変更を検出（チェックサムベース）
+ * @returns {Array} 変更があった翻訳ファイルの配列
+ */
+function detectChangedTranslationFiles() {
+  try {
+    // 翻訳ディレクトリが存在するか確認
+    if (!fs.existsSync(TRANSLATIONS_FOLDER)) {
+      console.log(`翻訳ファイルディレクトリが見つかりません: ${TRANSLATIONS_FOLDER}`);
+      return [];
+    }
+    
+    const files = fs.readdirSync(TRANSLATIONS_FOLDER)
+      .filter(file => file.endsWith('.csv') && file.includes('translations'))
+      .map(file => {
+        const filePath = path.join(TRANSLATIONS_FOLDER, file);
+        const langMatch = file.match(/translations_([a-z]{2}(?:[-_][A-Z]{2})?)\.csv/);
+        const language = langMatch ? langMatch[1] : 'default';
+        
+        return {
+          path: filePath,
+          name: file,
+          language: language,
+          checksum: calculateChecksum(filePath)
+        };
+      })
+      .filter(file => file.checksum !== null); // チェックサム計算に失敗したファイルを除外
+    
+    // 変更または新規の翻訳ファイルを特定（チェックサムの比較）
+    const changedFiles = files.filter(file => {
+      const lastChecksum = translationChecksums.get(file.path);
+      return lastChecksum === undefined || lastChecksum !== file.checksum;
+    });
+    
+    // 処理済み翻訳ファイル情報を更新
+    files.forEach(file => {
+      translationChecksums.set(file.path, file.checksum);
+    });
+    
+    // 更新された翻訳ファイルチェックサム情報を保存
+    saveChecksums(translationChecksums, TRANSLATION_CHECKSUM_STORE_PATH);
+    
+    return changedFiles;
+  } catch (error) {
+    console.error('翻訳ファイル変更検出中にエラーが発生しました:', error);
+    return [];
+  }
+}
+
 // プロセス終了時にチェックサム情報を保存
 process.on('exit', () => {
-  saveChecksums(fileChecksums);
+  saveChecksums(fileChecksums, CHECKSUM_STORE_PATH);
+  saveChecksums(translationChecksums, TRANSLATION_CHECKSUM_STORE_PATH);
 });
 
 // 予期せぬ終了時にもチェックサム情報を保存
 ['SIGINT', 'SIGTERM', 'SIGQUIT'].forEach(signal => {
   process.on(signal, () => {
-    saveChecksums(fileChecksums);
+    saveChecksums(fileChecksums, CHECKSUM_STORE_PATH);
+    saveChecksums(translationChecksums, TRANSLATION_CHECKSUM_STORE_PATH);
     process.exit(0);
   });
 });
 
-module.exports = { detectChangedFiles, fileChecksums };
+module.exports = { 
+  detectChangedFiles, 
+  detectChangedTranslationFiles, 
+  fileChecksums, 
+  translationChecksums 
+};

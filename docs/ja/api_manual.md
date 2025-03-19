@@ -32,6 +32,7 @@ http://{hostname}:{port}/api
 |----------|------|-------------|---------|
 | `display` | Boolean | タグの表示名を含めるかどうか | false |
 | `lang` | String | 表示名の言語コード (例: "ja", "en") | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするかどうか | false |
 
 ### エラーレスポンス
@@ -115,6 +116,7 @@ GET /api/tags
 |----------|------|-------------|---------|
 | `display` | Boolean | タグの表示名を含めるかどうか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 
 **レスポンス例:**
 
@@ -128,7 +130,7 @@ GET /api/tags
       "unit": "°C",
       "min": 50.2,
       "max": 79.8,
-      "display_name": "ポンプ01.温度"
+      "display_name": "Temperature"
     },
     ...
   ]
@@ -181,6 +183,7 @@ GET /api/data/:tagId
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 
 **レスポンス例:**
 
@@ -228,6 +231,7 @@ GET /api/batch
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 
 **リクエスト例:**
 
@@ -293,6 +297,7 @@ GET /api/current
 | `tags` | String | カンマ区切りのタグID (必須) | - |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 
 **リクエスト例:**
 
@@ -359,6 +364,7 @@ GET /api/process/ma/:tagId
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 
 **リクエスト例:**
 
@@ -449,6 +455,47 @@ GET /api/data/Pump01.Temperature?display=true&lang=en
 - `en` - 英語
 - その他、必要に応じて追加可能
 
+### showUnit パラメータの使用方法
+
+`showUnit=true`をクエリパラメータとして追加すると、表示名に単位情報が含まれた形式で返されます：
+
+```
+GET /api/data/Pump01.Temperature?display=true&showUnit=true
+```
+
+表示例: `Temperature (°C)`
+
+`showUnit=false`（またはパラメータ省略時）の場合は、単位情報が含まれない表示名が返されます：
+
+```
+GET /api/data/Pump01.Temperature?display=true&showUnit=false
+```
+
+表示例: `Temperature`
+
+### 表示名の重複処理
+
+同じ表示名が複数のタグに割り当てられている場合、APIは自動的に重複を検出し、2つ目以降のタグの表示名にサフィックスを追加します：
+
+- 最初のタグ： `Temperature`
+- 2つ目のタグ： `Temperature_1`
+- 3つ目のタグ： `Temperature_2`
+
+この処理はAPIレスポンス時に動的に行われ、元のデータベースの内容は変更されません。サフィックスの追加はタグIDの順序に基づいて一貫して適用されます。
+
+## システム運用機能
+
+### 翻訳ファイルの動的更新
+
+DataStream Hubは、サーバーの実行中に翻訳ファイルが更新された場合、自動的に変更を検出して反映します。
+
+- 翻訳ファイルは `translations` ディレクトリ内の `translations_[言語コード].csv` という命名規則のCSVファイルです
+- サーバー起動時に既存の翻訳ファイルが読み込まれます
+- サーバー実行中に翻訳ファイルが更新された場合、5分以内に自動的に新しい翻訳内容が反映されます
+- 変更の検出はファイルのチェックサムに基づいて行われるため、実際に内容が変更された場合のみ再読み込みが実行されます
+
+この機能により、サーバーの再起動なしでタグの表示名を更新できます。新しい設備や測定点が追加された場合や、表示名の修正が必要になった場合に便利です。
+
 ## 実装例
 
 ### Node.js クライアント実装例
@@ -467,10 +514,11 @@ class DataStreamHubClient {
   }
   
   async getTags(options = {}) {
-    const { display = false, lang = 'ja' } = options;
+    const { display = false, lang = 'ja', showUnit = false } = options;
     const params = new URLSearchParams();
     if (display) params.append('display', 'true');
     if (lang) params.append('lang', lang);
+    if (showUnit) params.append('showUnit', 'true');
     
     const url = `${this.baseUrl}/tags${params.toString() ? '?' + params.toString() : ''}`;
     const response = await fetch(url);
@@ -479,7 +527,7 @@ class DataStreamHubClient {
   }
   
   async getTagData(tagId, options = {}) {
-    const { start, end, timeshift = false, display = false, lang = 'ja' } = options;
+    const { start, end, timeshift = false, display = false, lang = 'ja', showUnit = false } = options;
     
     const params = new URLSearchParams();
     if (start) params.append('start', new Date(start).toISOString());
@@ -487,6 +535,7 @@ class DataStreamHubClient {
     if (timeshift) params.append('timeshift', 'true');
     if (display) params.append('display', 'true');
     if (lang) params.append('lang', lang);
+    if (showUnit) params.append('showUnit', 'true');
     
     const url = `${this.baseUrl}/data/${tagId}${params.toString() ? '?' + params.toString() : ''}`;
     const response = await fetch(url);
@@ -502,12 +551,13 @@ class DataStreamHubClient {
   }
   
   async getCurrentValues(tagIds, options = {}) {
-    const { display = false, lang = 'ja' } = options;
+    const { display = false, lang = 'ja', showUnit = false } = options;
     
     const params = new URLSearchParams();
     params.append('tags', Array.isArray(tagIds) ? tagIds.join(',') : tagIds);
     if (display) params.append('display', 'true');
     if (lang) params.append('lang', lang);
+    if (showUnit) params.append('showUnit', 'true');
     
     const url = `${this.baseUrl}/current?${params.toString()}`;
     const response = await fetch(url);
@@ -518,7 +568,7 @@ class DataStreamHubClient {
   }
   
   async getMovingAverage(tagId, options = {}) {
-    const { window = 5, start, end, timeshift = false, display = false, lang = 'ja' } = options;
+    const { window = 5, start, end, timeshift = false, display = false, lang = 'ja', showUnit = false } = options;
     
     const params = new URLSearchParams();
     params.append('window', window.toString());
@@ -527,6 +577,7 @@ class DataStreamHubClient {
     if (timeshift) params.append('timeshift', 'true');
     if (display) params.append('display', 'true');
     if (lang) params.append('lang', lang);
+    if (showUnit) params.append('showUnit', 'true');
     
     const url = `${this.baseUrl}/process/ma/${tagId}?${params.toString()}`;
     const response = await fetch(url);
@@ -567,18 +618,20 @@ class DataStreamHubClient:
         response.raise_for_status()
         return response.json()
     
-    def get_tags(self, display=False, lang='ja'):
+    def get_tags(self, display=False, lang='ja', show_unit=False):
         params = {}
         if display:
             params['display'] = 'true'
         if lang:
             params['lang'] = lang
+        if show_unit:
+            params['showUnit'] = 'true'
             
         response = requests.get(f"{self.base_url}/tags", params=params)
         response.raise_for_status()
         return response.json()
     
-    def get_tag_data(self, tag_id, start=None, end=None, timeshift=False, display=False, lang='ja'):
+    def get_tag_data(self, tag_id, start=None, end=None, timeshift=False, display=False, lang='ja', show_unit=False):
         params = {}
         if start:
             params['start'] = start.isoformat() if isinstance(start, datetime) else start
@@ -590,12 +643,14 @@ class DataStreamHubClient:
             params['display'] = 'true'
         if lang:
             params['lang'] = lang
+        if show_unit:
+            params['showUnit'] = 'true'
             
         response = requests.get(f"{self.base_url}/data/{tag_id}", params=params)
         response.raise_for_status()
         return response.json()
     
-    def get_current_values(self, tag_ids, display=False, lang='ja'):
+    def get_current_values(self, tag_ids, display=False, lang='ja', show_unit=False):
         if isinstance(tag_ids, list):
             tag_ids = ','.join(tag_ids)
             
@@ -606,13 +661,15 @@ class DataStreamHubClient:
             params['display'] = 'true'
         if lang:
             params['lang'] = lang
+        if show_unit:
+            params['showUnit'] = 'true'
             
         response = requests.get(f"{self.base_url}/current", params=params)
         response.raise_for_status()
         return response.json()
     
     def get_moving_average(self, tag_id, window=5, start=None, end=None, 
-                          timeshift=False, display=False, lang='ja'):
+                          timeshift=False, display=False, lang='ja', show_unit=False):
         params = {
             'window': window
         }
@@ -626,6 +683,8 @@ class DataStreamHubClient:
             params['display'] = 'true'
         if lang:
             params['lang'] = lang
+        if show_unit:
+            params['showUnit'] = 'true'
             
         response = requests.get(f"{self.base_url}/process/ma/{tag_id}", params=params)
         response.raise_for_status()

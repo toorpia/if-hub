@@ -84,10 +84,11 @@ app.get('/api/system/info', (req, res) => {
 
 // 利用可能なタグ一覧
 app.get('/api/tags', (req, res) => {
-  const { display = 'false', lang = 'ja' } = req.query;
+  const { display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   try {
     const shouldDisplay = display === 'true';
+    const shouldShowUnit = showUnit === 'true';
     
     // 全タグを取得
     const tags = db.prepare('SELECT * FROM tags').all();
@@ -95,12 +96,17 @@ app.get('/api/tags', (req, res) => {
     // 表示名を含める場合
     if (shouldDisplay) {
       const tagIds = tags.map(tag => tag.id);
-      const metadataMap = getTagsMetadata(tagIds, { display: true, lang });
+      const metadataMap = getTagsMetadata(tagIds, { 
+        display: true, 
+        lang, 
+        showUnit: shouldShowUnit 
+      });
       
       // 表示名を含めたタグデータを返す
       const tagsWithDisplayNames = tags.map(tag => ({
         ...tag,
-        display_name: metadataMap[tag.id]?.display_name || tag.name
+        display_name: metadataMap[tag.id]?.display_name || tag.name,
+        unit: metadataMap[tag.id]?.unit || tag.unit
       }));
       
       res.json({ tags: tagsWithDisplayNames });
@@ -133,7 +139,7 @@ app.get('/api/equipment', (req, res) => {
 // 特定タグのデータ取得
 app.get('/api/data/:tagId', (req, res) => {
   const { tagId } = req.params;
-  const { start, end, timeshift, display = 'false', lang = 'ja' } = req.query;
+  const { start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   try {
     // タグの存在確認
@@ -146,7 +152,8 @@ app.get('/api/data/:tagId', (req, res) => {
     // タグのメタデータを取得（表示名オプション付き）
     const metadata = getTagMetadata(tagId, {
       display: display === 'true',
-      lang
+      lang,
+      showUnit: showUnit === 'true'
     });
     
     // 時間範囲のフィルタリング
@@ -184,7 +191,7 @@ app.get('/api/data/:tagId', (req, res) => {
 
 // 複数タグの一括取得
 app.get('/api/batch', (req, res) => {
-  const { tags, start, end, timeshift, display = 'false', lang = 'ja' } = req.query;
+  const { tags, start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   if (!tags) {
     return res.status(400).json({ error: 'Tags parameter is required' });
@@ -194,12 +201,14 @@ app.get('/api/batch', (req, res) => {
     const tagIds = tags.split(',');
     const shouldTimeShift = timeshift === 'true';
     const shouldDisplay = display === 'true';
+    const shouldShowUnit = showUnit === 'true';
     const result = {};
     
     // 一括でメタデータを取得（表示名オプション付き）
     const metadataMap = getTagsMetadata(tagIds, {
       display: shouldDisplay,
-      lang
+      lang,
+      showUnit: shouldShowUnit
     });
     
     for (const tagId of tagIds) {
@@ -242,7 +251,7 @@ app.get('/api/batch', (req, res) => {
 
 // 最新値取得（現在のポーリングをシミュレート）
 app.get('/api/current', (req, res) => {
-  const { tags, display = 'false', lang = 'ja' } = req.query;
+  const { tags, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   if (!tags) {
     return res.status(400).json({ error: 'Tags parameter is required' });
@@ -256,7 +265,8 @@ app.get('/api/current', (req, res) => {
     // 一括でメタデータを取得（表示名オプション付き）
     const metadataMap = getTagsMetadata(tagIds, {
       display: display === 'true',
-      lang
+      lang,
+      showUnit: showUnit === 'true'
     });
     
     for (const tagId of tagIds) {
@@ -343,7 +353,8 @@ app.get('/api/process/ma/:tagId', async (req, res) => {
     end, 
     timeshift = 'false',
     display = 'false',
-    lang = 'ja'
+    lang = 'ja',
+    showUnit = 'false'
   } = req.query;
   
   try {
@@ -357,7 +368,8 @@ app.get('/api/process/ma/:tagId', async (req, res) => {
     // タグのメタデータを取得（表示名オプション付き）
     const metadata = getTagMetadata(tagId, {
       display: display === 'true',
-      lang
+      lang,
+      showUnit: showUnit === 'true'
     });
     
     // タグデータを取得
@@ -420,7 +432,12 @@ app.get('/api/process/ma/:tagId', async (req, res) => {
 async function startServer() {
   try {
     // ファイル監視とインポート機能をインポート
-    const { detectChangedFiles, fileChecksums } = require('./utils/file-watcher');
+    const { 
+      detectChangedFiles, 
+      detectChangedTranslationFiles, 
+      fileChecksums,
+      translationChecksums 
+    } = require('./utils/file-watcher');
     const { importSpecificCsvFile } = require('./utils/csv-importer');
     
     console.log('CSV変更の確認を開始します...');
@@ -442,8 +459,20 @@ async function startServer() {
       console.log('更新されたCSVファイルはありません。インポートはスキップします。');
     }
     
-    // タグ表示名をインポート
-    await importTagTranslations();
+    // 翻訳ファイルの変更を確認
+    console.log('翻訳ファイル変更の確認を開始します...');
+    const changedTranslationFiles = detectChangedTranslationFiles();
+    
+    if (changedTranslationFiles.length > 0) {
+      console.log(`${changedTranslationFiles.length}個の翻訳ファイルの変更を検出しました`);
+      // タグ表示名をインポート
+      await importTagTranslations();
+      console.log('翻訳ファイルの更新処理が完了しました');
+    } else {
+      console.log('更新された翻訳ファイルはありません');
+      // それでも初回は読み込む
+      await importTagTranslations();
+    }
     
     app.listen(PORT, () => {
       console.log(`DataStream Hub Server running on port ${PORT}`);
@@ -481,6 +510,26 @@ async function startServer() {
         console.error('CSV監視処理中にエラーが発生しました:', error);
       }
     }, 60000); // 1分間隔
+    
+    // 5分おきに翻訳ファイルを監視
+    console.log(`翻訳ファイル監視を開始します (間隔: 5分)`);
+    
+    setInterval(async () => {
+      try {
+        const changedTranslationFiles = detectChangedTranslationFiles();
+        
+        if (changedTranslationFiles.length > 0) {
+          console.log(`${changedTranslationFiles.length}個の翻訳ファイルの変更を検出しました`);
+          
+          // タグ表示名をインポート
+          await importTagTranslations();
+          
+          console.log('翻訳ファイルの更新処理が完了しました');
+        }
+      } catch (error) {
+        console.error('翻訳ファイル監視処理中にエラーが発生しました:', error);
+      }
+    }, 300000); // 5分間隔
   } catch (error) {
     console.error('サーバー起動中にエラーが発生しました:', error);
     process.exit(1);

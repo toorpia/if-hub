@@ -49,6 +49,7 @@ function initDatabase() {
       tag_id TEXT NOT NULL,
       language TEXT NOT NULL,
       display_name TEXT NOT NULL,
+      unit TEXT,
       PRIMARY KEY (tag_id, language),
       FOREIGN KEY (tag_id) REFERENCES tags(id)
     )

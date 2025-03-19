@@ -57,17 +57,18 @@ async function importTagTranslations() {
         
         // タグ表示名を挿入
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO tag_translations (tag_id, language, display_name)
-          VALUES (?, ?, ?)
+          INSERT OR REPLACE INTO tag_translations (tag_id, language, display_name, unit)
+          VALUES (?, ?, ?, ?)
         `);
         
         let counter = 0;
         for (const row of rows) {
           const tagId = row.tag_id || row.tagId;
           const displayName = row.display_name || row.displayName;
+          const unit = row.unit || '';
           
           if (tagId && displayName) {
-            stmt.run(tagId, language, displayName);
+            stmt.run(tagId, language, displayName, unit);
             counter++;
           }
         }
