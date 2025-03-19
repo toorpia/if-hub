@@ -29,8 +29,11 @@ module.exports = {
       ? 'real'  // 本番環境では実際のPI System
       : 'mock', // 開発環境ではモックデータ
       
-    // モックデータフォルダ（ドッカー環境に合わせたパス）
-    mockDataPath: process.env.MOCK_DATA_PATH || '/app/static_equipment_data',
+    // モックデータフォルダ（Docker環境と非Docker環境の両方に対応）
+    mockDataPath: process.env.MOCK_DATA_PATH || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/static_equipment_data' 
+        : path.join(process.cwd(), 'static_equipment_data')),
     
     // ログ出力先
     logPath: process.env.LOG_PATH || '/app/logs'

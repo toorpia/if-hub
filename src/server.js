@@ -1101,23 +1101,43 @@ async function startServer() {
     await loadAllGtagDefinitions();
     console.log('gtagシステムの初期化が完了しました');
     
-    console.log('CSV変更の確認を開始します...');
+    console.log('CSVファイルのロードを開始します...');
     
-    // 起動時にチェックサムベースで変更ファイルを検出
-    const changedFiles = detectChangedFiles();
-    
-    if (changedFiles.length > 0) {
-      console.log(`${changedFiles.length}個のCSVファイルの変更を検出しました`);
+    try {
+      // CSVフォルダパスを取得
+      const csvPath = config.piSystem.mockDataPath;
+      console.log(`CSVフォルダパス: ${csvPath}`);
       
-      for (const fileInfo of changedFiles) {
-        const oldChecksum = fileChecksums.get(fileInfo.path) || '新規ファイル';
-        console.log(`ファイル ${fileInfo.name} の更新を処理します（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
-        await importSpecificCsvFile(fileInfo);
+      if (fs.existsSync(csvPath)) {
+        // CSVファイル一覧を取得
+        const files = fs.readdirSync(csvPath).filter(file => file.endsWith('.csv'));
+        console.log(`${files.length}個のCSVファイルが見つかりました`);
+        
+        if (files.length > 0) {
+          // すべてのCSVファイルを強制的に処理
+          console.log('すべてのCSVファイルを強制的に読み込みます');
+          
+          for (const file of files) {
+            const fileInfo = {
+              path: path.join(csvPath, file),
+              name: file,
+              equipmentId: path.basename(file, '.csv'),
+              checksum: 'force-import-' + Date.now() // 強制読み込み用の一時的なチェックサム
+            };
+            
+            console.log(`ファイル ${fileInfo.name} を処理中...`);
+            await importSpecificCsvFile(fileInfo);
+          }
+          
+          console.log('CSVファイルの処理が完了しました');
+        } else {
+          console.log('CSVファイルが見つかりませんでした');
+        }
+      } else {
+        console.log(`CSVフォルダ ${csvPath} が存在しません`);
       }
-      
-      console.log('CSV更新の処理が完了しました');
-    } else {
-      console.log('更新されたCSVファイルはありません。インポートはスキップします。');
+    } catch (error) {
+      console.error('CSVファイルのロード中にエラーが発生しました:', error);
     }
     
     // タグメタデータファイルの変更を確認

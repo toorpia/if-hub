@@ -251,6 +251,98 @@ stmtTag.run(
 
 この実装により、同じソースタグ（例：`Temperature`）を持つ異なる設備の同種センサーを一括で管理できます。
 
+### 大規模CSVファイル処理の最適化
+
+DataStream Hubは、大規模なCSVファイルを効率的に処理するための最適化が実装されています：
+
+#### ストリーミング処理方式
+
+大量のデータを扱う場合に重要な点は、全データを一度にメモリに読み込まないことです。CSVインポーターでは以下のような最適化が行われています：
+
+```javascript
+// ヘッダー行のみを先に取得
+async function getHeaderRow(filePath) {
+  return new Promise((resolve, reject) => {
+    let headerRow = null;
+    const stream = fs.createReadStream(filePath)
+      .pipe(csv())
+      .on('data', (row) => {
+        headerRow = row;
+        stream.destroy(); // 最初の行を取得したらストリームを終了
+      })
+      .on('end', () => {
+        if (headerRow) {
+          resolve(headerRow);
+        } else {
+          reject(new Error('CSVファイルにヘッダー行がありません'));
+        }
+      })
+      .on('error', reject);
+  });
+}
+
+// 各タグごとに個別にデータを処理
+async function processTagData(filePath, tagId, header, timestampColumn, equipmentId) {
+  // ...ストリーミング処理の実装...
+}
+```
+
+#### バッチ処理とトランザクション管理
+
+大量のデータ挿入を効率的に行うために、バッチ処理とトランザクション分割が実装されています：
+
+```javascript
+// 一定サイズごとにバッチ処理
+const BATCH_SIZE = 500;
+
+// バッチがたまったらDBに挿入
+if (batch.length >= BATCH_SIZE) {
+  for (const point of batch) {
+    stmtData.run(point.tagId, point.timestamp, point.value);
+  }
+  batch = []; // バッチをクリア
+  
+  // 定期的にコミットして新しいトランザクションを開始（メモリ解放）
+  db.exec('COMMIT');
+  db.exec('BEGIN TRANSACTION');
+}
+```
+
+#### 強制読み込みモード
+
+システム起動時にCSVファイルを確実に読み込むために、チェックサム比較に依存しない強制読み込みモードが実装されています：
+
+```javascript
+// すべてのCSVファイルを強制的に処理
+console.log('すべてのCSVファイルを強制的に読み込みます');
+
+for (const file of files) {
+  const fileInfo = {
+    path: path.join(csvPath, file),
+    name: file,
+    equipmentId: path.basename(file, '.csv'),
+    checksum: 'force-import-' + Date.now() // 強制読み込み用の一時的なチェックサム
+  };
+  
+  console.log(`ファイル ${fileInfo.name} を処理中...`);
+  await importSpecificCsvFile(fileInfo);
+}
+```
+
+#### 環境に依存しないパス設定
+
+Docker環境と非Docker環境の両方で適切に動作するよう、パス設定が最適化されています：
+
+```javascript
+// モックデータフォルダのパス設定
+mockDataPath: process.env.MOCK_DATA_PATH || 
+  (process.env.NODE_ENV === 'production' 
+    ? '/app/static_equipment_data' 
+    : path.join(process.cwd(), 'static_equipment_data')),
+```
+
+これらの最適化により、DataStream Hubは大規模CSVファイルを効率的に処理し、メモリ使用量を抑えながら正確なデータ取り込みを実現しています。
+
 ### ファイル監視と動的データ更新
 
 DataStream Hubには、サーバー実行中にCSVファイルの変更を検出して自動的にデータを更新する機能があります：
