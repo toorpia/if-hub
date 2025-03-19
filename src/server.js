@@ -84,14 +84,33 @@ app.get('/api/system/info', (req, res) => {
 
 // 利用可能なタグ一覧
 app.get('/api/tags', (req, res) => {
-  const { display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  const { display = 'false', lang = 'ja', showUnit = 'false', equipment } = req.query;
   
   try {
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
     
-    // 全タグを取得
-    const tags = db.prepare('SELECT * FROM tags').all();
+    // SQLクエリの構築
+    let query = 'SELECT * FROM tags';
+    const params = [];
+    
+    // 設備によるフィルタリング
+    if (equipment) {
+      // カンマ区切りの値を配列に変換
+      const equipmentList = equipment.split(',');
+      if (equipmentList.length === 1) {
+        // 単一の設備
+        query += ' WHERE equipment = ?';
+        params.push(equipmentList[0]);
+      } else if (equipmentList.length > 1) {
+        // 複数の設備（IN句を使用）
+        query += ' WHERE equipment IN (' + equipmentList.map(() => '?').join(',') + ')';
+        params.push(...equipmentList);
+      }
+    }
+    
+    // タグを取得
+    const tags = db.prepare(query).all(...params);
     
     // 表示名を含める場合
     if (shouldDisplay) {
@@ -122,12 +141,48 @@ app.get('/api/tags', (req, res) => {
 
 // 設備一覧
 app.get('/api/equipment', (req, res) => {
+  const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  
   try {
+    // 設備情報を取得
     const equipment = db.prepare(`
       SELECT equipment as id, equipment as name, COUNT(*) as tagCount
       FROM tags
       GROUP BY equipment
     `).all();
+    
+    const shouldIncludeTags = includeTags === 'true';
+    
+    // タグ情報を含める場合
+    if (shouldIncludeTags) {
+      const shouldDisplay = display === 'true';
+      const shouldShowUnit = showUnit === 'true';
+      
+      // 各設備のタグ情報を取得
+      for (const equip of equipment) {
+        // 設備に関連するタグを取得
+        const tags = db.prepare('SELECT * FROM tags WHERE equipment = ?').all(equip.id);
+        
+        // タグに表示名を含める場合
+        if (shouldDisplay) {
+          const tagIds = tags.map(tag => tag.id);
+          const metadataMap = getTagsMetadata(tagIds, {
+            display: true,
+            lang,
+            showUnit: shouldShowUnit
+          });
+          
+          // 表示名を含めたタグデータを設定
+          equip.tags = tags.map(tag => ({
+            ...tag,
+            display_name: metadataMap[tag.id]?.display_name || tag.name,
+            unit: metadataMap[tag.id]?.unit || tag.unit
+          }));
+        } else {
+          equip.tags = tags;
+        }
+      }
+    }
     
     res.json({ equipment });
   } catch (error) {

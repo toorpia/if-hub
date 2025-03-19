@@ -109,12 +109,13 @@ GET /api/status
 GET /api/tags
 ```
 
-システム内のすべてのタグ情報を取得します。
+システム内のタグ情報を取得します。設備パラメータを指定することで、特定の設備に関連するタグのみをフィルタリングできます。
 
 **クエリパラメータ:**
 
 | パラメータ | 型 | 説明 | デフォルト |
 |----------|------|-------------|---------|
+| `equipment` | String | 特定の設備のタグのみを取得（カンマ区切りで複数指定可能） | なし（全設備） |
 | `display` | Boolean | タグの表示名を含めるかどうか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
@@ -144,9 +145,18 @@ GET /api/tags
 GET /api/equipment
 ```
 
-システム内のすべての設備情報を取得します。
+システム内のすべての設備情報を取得します。`includeTags=true`パラメータを指定すると、各設備に関連するタグ情報も含まれます。
 
-**レスポンス例:**
+**クエリパラメータ:**
+
+| パラメータ | 型 | 説明 | デフォルト |
+|----------|------|-------------|---------|
+| `includeTags` | Boolean | 設備に関連するタグ情報を含めるかどうか | false |
+| `display` | Boolean | タグの表示名を含めるかどうか（`includeTags=true`の場合に有効） | false |
+| `lang` | String | 表示名の言語コード（`includeTags=true`の場合に有効） | "ja" |
+| `showUnit` | Boolean | 表示名に単位を含めるかどうか（`includeTags=true`の場合に有効） | false |
+
+**レスポンス例 (includeTags=false):**
 
 ```json
 {
@@ -155,6 +165,40 @@ GET /api/equipment
       "id": "Pump01",
       "name": "Pump01",
       "tagCount": 4
+    },
+    ...
+  ]
+}
+```
+
+**レスポンス例 (includeTags=true):**
+
+```json
+{
+  "equipment": [
+    {
+      "id": "Pump01",
+      "name": "Pump01",
+      "tagCount": 4,
+      "tags": [
+        {
+          "id": "Pump01.Temperature",
+          "equipment": "Pump01",
+          "name": "Temperature",
+          "unit": "°C",
+          "min": 50.2,
+          "max": 79.8
+        },
+        {
+          "id": "Pump01.Pressure",
+          "equipment": "Pump01",
+          "name": "Pressure",
+          "unit": "kPa",
+          "min": 100.3,
+          "max": 150.7
+        },
+        ...
+      ]
     },
     ...
   ]
