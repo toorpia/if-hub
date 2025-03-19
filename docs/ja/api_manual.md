@@ -6,10 +6,11 @@
 2. [システム情報 API](#システム情報-api)
 3. [タグデータ操作 API](#タグデータ操作-api)
 4. [データ処理 API](#データ処理-api)
-5. [レスポンス形式](#レスポンス形式)
-6. [表示名オプション](#表示名オプション)
-7. [システム運用機能](#システム運用機能)
-8. [実装例](#実装例)
+5. [仮想タグ（gtag）システム](#仮想タグgtag-システム)
+6. [レスポンス形式](#レスポンス形式)
+7. [表示名オプション](#表示名オプション)
+8. [システム運用機能](#システム運用機能)
+9. [実装例](#実装例)
 
 ## API概要
 
@@ -582,6 +583,124 @@ GET /api/process/deviation/Pump01.Temperature?window=10&display=true
   ]
 }
 ```
+
+## 計算生成タグ（gtag）システム
+
+仮想タグ（gtag）は、複数の実タグを組み合わせて計算処理を行うための拡張機能です。物理的に測定できない値や複雑な指標を計算するのに役立ちます。
+
+### 概要
+
+gtagには主に2つのタイプがあります：
+
+1. **計算タイプ（calculation）**：数式を使用して値を計算します
+2. **Pythonスクリプトタイプ（python）**：より複雑な計算にPythonスクリプトを使用します
+
+### gtag定義の構造
+
+#### 計算タイプの例：
+
+```json
+{
+  "id": "Pump01.EfficiencyIndex",
+  "name": "EfficiencyIndex",
+  "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
+  "equipment": "Pump01",
+  "unit": "%",
+  "type": "calculation",
+  "expression": "(Pump01.Flow / Pump01.PowerConsumption) * 100",
+  "sourceTags": ["Pump01.Flow", "Pump01.PowerConsumption"],
+  "options": {
+    "fillMissingData": "interpolate"
+  }
+}
+```
+
+#### Pythonスクリプトタイプの例：
+
+```json
+{
+  "id": "Tank01.PredictedLevel",
+  "name": "PredictedLevel",
+  "description": "タンク01の30分後の水位予測",
+  "equipment": "Tank01",
+  "unit": "m",
+  "type": "python",
+  "script": "predict_level.py",
+  "function": "predict_future_level",
+  "parameters": {
+    "prediction_minutes": 30
+  },
+  "sourceTags": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "options": {
+    "cacheTime": 300
+  }
+}
+```
+
+### gtagの使用方法
+
+gtagは通常のタグと同様に扱うことができます。主なAPIエンドポイントは以下の通りです：
+
+#### gtag一覧の取得
+
+```
+GET /api/gtags
+```
+
+**レスポンス例:**
+
+```json
+{
+  "gtags": [
+    {
+      "id": "Pump01.EfficiencyIndex",
+      "equipment": "Pump01",
+      "name": "EfficiencyIndex",
+      "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
+      "unit": "%",
+      "type": "calculation",
+      "sourceTags": ["Pump01.Flow", "Pump01.PowerConsumption"],
+      "createdAt": "2023-07-01T00:00:00.000Z",
+      "updatedAt": "2023-07-01T00:00:00.000Z"
+    },
+    {
+      "id": "Tank01.PredictedLevel",
+      "equipment": "Tank01",
+      "name": "PredictedLevel",
+      "description": "タンク01の30分後の水位予測",
+      "unit": "m",
+      "type": "python",
+      "sourceTags": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+      "createdAt": "2023-07-01T00:00:00.000Z",
+      "updatedAt": "2023-07-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+#### gtagデータの取得
+
+gtagのデータは、通常のタグと同じAPIエンドポイントを使用して取得できます：
+
+```
+GET /api/data/Pump01.EfficiencyIndex
+GET /api/batch?tags=Pump01.Flow,Pump01.EfficiencyIndex
+```
+
+#### タグ一覧と設備一覧でのgtag表示
+
+タグ一覧API (`/api/tags`) と設備一覧API (`/api/equipment?includeTags=true`) は、デフォルトでgtagを含めます。gtagを除外するには、クエリパラメータ `includeGtags=false` を使用します。
+
+```
+GET /api/tags?includeGtags=false
+GET /api/equipment?includeTags=true&includeGtags=false
+```
+
+### gtagの同期と更新
+
+- gtagはJSON形式の定義ファイルとして `gtags/definitions/` ディレクトリに保存されます
+- サーバー起動時に全てのgtag定義が読み込まれます
+- サーバー実行中にgtag定義ファイルが更新された場合、5分以内に自動的に変更が検出され反映されます
 
 ## レスポンス形式
 

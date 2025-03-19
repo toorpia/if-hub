@@ -9,6 +9,14 @@ const { db } = require('./db');
 const { importCsvToDatabase } = require('./utils/csv-importer');
 const { importTagTranslations } = require('./utils/tag-translations-importer');
 const { getTagMetadata, getTagsMetadata } = require('./utils/tag-utils');
+const { 
+  initializeGtagSystem, 
+  loadAllGtagDefinitions, 
+  detectChangedGtagFiles, 
+  importGtagDefinition,
+  getGtagData,
+  gtagChecksums
+} = require('./utils/gtag-utils');
 
 const app = express();
 const PORT = config.server.port;
@@ -84,11 +92,12 @@ app.get('/api/system/info', (req, res) => {
 
 // 利用可能なタグ一覧
 app.get('/api/tags', (req, res) => {
-  const { display = 'false', lang = 'ja', showUnit = 'false', equipment } = req.query;
+  const { display = 'false', lang = 'ja', showUnit = 'false', equipment, includeGtags = 'true' } = req.query;
   
   try {
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
+    const shouldIncludeGtags = includeGtags === 'true';
     
     // SQLクエリの構築
     let query = 'SELECT * FROM tags';
@@ -109,10 +118,48 @@ app.get('/api/tags', (req, res) => {
       }
     }
     
-    // タグを取得
+    // 通常タグを取得
     const tags = db.prepare(query).all(...params);
     
-    // 表示名を含める場合
+    // gtagも取得
+    let gtags = [];
+    if (shouldIncludeGtags) {
+      let gtagQuery = 'SELECT * FROM gtags';
+      const gtagParams = [];
+      
+      if (equipment) {
+        // 設備フィルタリングを適用
+        if (equipment.includes(',')) {
+          const equipmentList = equipment.split(',');
+          gtagQuery += ' WHERE equipment IN (' + equipmentList.map(() => '?').join(',') + ')';
+          gtagParams.push(...equipmentList);
+        } else {
+          gtagQuery += ' WHERE equipment = ?';
+          gtagParams.push(equipment);
+        }
+      }
+      
+      gtags = db.prepare(gtagQuery).all(...gtagParams);
+      
+      // gtagをタグ形式に変換
+      gtags = gtags.map(gtag => {
+        const definition = JSON.parse(gtag.definition);
+        return {
+          id: gtag.id,
+          equipment: gtag.equipment,
+          name: gtag.name,
+          unit: gtag.unit || '',
+          description: gtag.description || '',
+          is_gtag: true,
+          type: gtag.type
+        };
+      });
+    }
+    
+    // 通常タグとgtagを統合
+    const allTags = [...tags, ...gtags];
+    
+    // 表示名処理
     if (shouldDisplay) {
       const tagIds = tags.map(tag => tag.id);
       const metadataMap = getTagsMetadata(tagIds, { 
@@ -121,17 +168,28 @@ app.get('/api/tags', (req, res) => {
         showUnit: shouldShowUnit 
       });
       
-      // 表示名を含めたタグデータを返す
-      const tagsWithDisplayNames = tags.map(tag => ({
-        ...tag,
-        display_name: metadataMap[tag.id]?.display_name || tag.name,
-        unit: metadataMap[tag.id]?.unit || tag.unit
-      }));
+      // 通常タグに表示名を追加
+      const tagsWithDisplayNames = allTags.map(tag => {
+        if (tag.is_gtag) {
+          // gtagの場合
+          return {
+            ...tag,
+            display_name: tag.description || tag.name
+          };
+        } else {
+          // 通常タグの場合
+          return {
+            ...tag,
+            display_name: metadataMap[tag.id]?.display_name || tag.name,
+            unit: metadataMap[tag.id]?.unit || tag.unit
+          };
+        }
+      });
       
       res.json({ tags: tagsWithDisplayNames });
     } else {
       // 通常のタグデータを返す
-      res.json({ tags });
+      res.json({ tags: allTags });
     }
   } catch (error) {
     console.error('タグ一覧の取得中にエラーが発生しました:', error);
@@ -139,9 +197,36 @@ app.get('/api/tags', (req, res) => {
   }
 });
 
+// gtag一覧取得
+app.get('/api/gtags', (req, res) => {
+  try {
+    const gtags = db.prepare('SELECT * FROM gtags').all();
+    
+    const formattedGtags = gtags.map(gtag => {
+      const definition = JSON.parse(gtag.definition);
+      return {
+        id: gtag.id,
+        equipment: gtag.equipment,
+        name: gtag.name,
+        description: gtag.description || '',
+        unit: gtag.unit || '',
+        type: gtag.type,
+        sourceTags: definition.sourceTags || [],
+        createdAt: gtag.created_at,
+        updatedAt: gtag.updated_at
+      };
+    });
+    
+    res.json({ gtags: formattedGtags });
+  } catch (error) {
+    console.error('gtag一覧の取得中にエラーが発生しました:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // 設備一覧
 app.get('/api/equipment', (req, res) => {
-  const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false', includeGtags = 'true' } = req.query;
   
   try {
     // 設備情報を取得
@@ -152,6 +237,7 @@ app.get('/api/equipment', (req, res) => {
     `).all();
     
     const shouldIncludeTags = includeTags === 'true';
+    const shouldIncludeGtags = includeGtags === 'true';
     
     // タグ情報を含める場合
     if (shouldIncludeTags) {
@@ -163,6 +249,29 @@ app.get('/api/equipment', (req, res) => {
         // 設備に関連するタグを取得
         const tags = db.prepare('SELECT * FROM tags WHERE equipment = ?').all(equip.id);
         
+        // 設備に関連するgtagを取得
+        let gtags = [];
+        if (shouldIncludeGtags) {
+          gtags = db.prepare('SELECT * FROM gtags WHERE equipment = ?').all(equip.id);
+          
+          // gtagをタグ形式に変換
+          gtags = gtags.map(gtag => {
+            const definition = JSON.parse(gtag.definition);
+            return {
+              id: gtag.id,
+              equipment: gtag.equipment,
+              name: gtag.name,
+              unit: gtag.unit || '',
+              description: gtag.description || '',
+              is_gtag: true,
+              type: gtag.type
+            };
+          });
+        }
+        
+        // 通常タグとgtagを結合
+        const allTags = [...tags, ...gtags];
+        
         // タグに表示名を含める場合
         if (shouldDisplay) {
           const tagIds = tags.map(tag => tag.id);
@@ -172,14 +281,25 @@ app.get('/api/equipment', (req, res) => {
             showUnit: shouldShowUnit
           });
           
-          // 表示名を含めたタグデータを設定
-          equip.tags = tags.map(tag => ({
-            ...tag,
-            display_name: metadataMap[tag.id]?.display_name || tag.name,
-            unit: metadataMap[tag.id]?.unit || tag.unit
-          }));
+          // タグデータに表示名を設定
+          equip.tags = allTags.map(tag => {
+            if (tag.is_gtag) {
+              // gtagの場合
+              return {
+                ...tag,
+                display_name: tag.description || tag.name
+              };
+            } else {
+              // 通常タグの場合
+              return {
+                ...tag,
+                display_name: metadataMap[tag.id]?.display_name || tag.name,
+                unit: metadataMap[tag.id]?.unit || tag.unit
+              };
+            }
+          });
         } else {
-          equip.tags = tags;
+          equip.tags = allTags;
         }
       }
     }
@@ -192,18 +312,57 @@ app.get('/api/equipment', (req, res) => {
 });
 
 // 特定タグのデータ取得
-app.get('/api/data/:tagId', (req, res) => {
+app.get('/api/data/:tagId', async (req, res) => {
   const { tagId } = req.params;
   const { start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   try {
-    // タグの存在確認
+    // タグが通常タグかgtagかチェック
     const tagExists = db.prepare('SELECT COUNT(*) as count FROM tags WHERE id = ?').get(tagId).count > 0;
+    const gtagExists = db.prepare('SELECT COUNT(*) as count FROM gtags WHERE id = ?').get(tagId).count > 0;
     
-    if (!tagExists) {
+    // タグもgtagも存在しない場合
+    if (!tagExists && !gtagExists) {
       return res.status(404).json({ error: `Tag ${tagId} not found` });
     }
     
+    const shouldTimeShift = timeshift === 'true';
+    
+    // gtagの場合
+    if (gtagExists) {
+      // gtagの定義を取得
+      const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
+      const definition = JSON.parse(gtag.definition);
+      
+      // メタデータを構築
+      const metadata = {
+        id: gtag.id,
+        equipment: gtag.equipment,
+        name: gtag.name,
+        unit: gtag.unit || '',
+        description: gtag.description || '',
+        is_gtag: true,
+        type: gtag.type
+      };
+      
+      if (display === 'true') {
+        metadata.display_name = gtag.description || gtag.name;
+      }
+      
+      // gtagのデータを計算
+      const gtagData = await getGtagData(gtag, { start, end });
+      
+      // タイムシフトを適用
+      const processedData = shouldTimeShift ? getTimeShiftedData(gtagData, true) : gtagData;
+      
+      return res.json({
+        tagId,
+        metadata,
+        data: processedData
+      });
+    }
+    
+    // 通常タグの場合
     // タグのメタデータを取得（表示名オプション付き）
     const metadata = getTagMetadata(tagId, {
       display: display === 'true',
@@ -233,7 +392,6 @@ app.get('/api/data/:tagId', (req, res) => {
     const tagData = db.prepare(query).all(...params);
     
     // タイムシフトを適用
-    const shouldTimeShift = timeshift === 'true';
     const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
     
     res.json({
@@ -248,7 +406,7 @@ app.get('/api/data/:tagId', (req, res) => {
 });
 
 // 複数タグの一括取得
-app.get('/api/batch', (req, res) => {
+app.get('/api/batch', async (req, res) => {
   const { tags, start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   if (!tags) {
@@ -262,42 +420,89 @@ app.get('/api/batch', (req, res) => {
     const shouldShowUnit = showUnit === 'true';
     const result = {};
     
-    // 一括でメタデータを取得（表示名オプション付き）
+    // 一括でメタデータを取得（通常タグ用）
     const metadataMap = getTagsMetadata(tagIds, {
       display: shouldDisplay,
       lang,
       showUnit: shouldShowUnit
     });
     
+    // gtagのIDリストを作成
+    const gtagIds = [];
+    const normalTagIds = [];
+    
     for (const tagId of tagIds) {
-      // タグが存在するか確認
-      if (metadataMap[tagId]) {
-        // 時間範囲のフィルタリング
-        let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
-        const params = [tagId];
+      // gtagかどうか判定
+      const isGtag = db.prepare('SELECT COUNT(*) as count FROM gtags WHERE id = ?').get(tagId).count > 0;
+      
+      if (isGtag) {
+        gtagIds.push(tagId);
+      } else if (metadataMap[tagId]) {
+        normalTagIds.push(tagId);
+      }
+    }
+    
+    // 通常タグの処理
+    for (const tagId of normalTagIds) {
+      // 時間範囲のフィルタリング
+      let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+      const params = [tagId];
+      
+      if (start) {
+        query += ' AND timestamp >= ?';
+        params.push(new Date(start).toISOString());
+      }
+      
+      if (end) {
+        query += ' AND timestamp <= ?';
+        params.push(new Date(end).toISOString());
+      }
+      
+      query += ' ORDER BY timestamp';
+      
+      // レコード数の上限を適用
+      query += ` LIMIT ${config.api.maxRecordsPerRequest}`;
+      
+      const tagData = db.prepare(query).all(...params);
+      
+      // タイムシフトを適用
+      const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+      
+      result[tagId] = {
+        metadata: metadataMap[tagId],
+        data: processedData
+      };
+    }
+    
+    // gtagの処理
+    for (const tagId of gtagIds) {
+      // gtagの定義を取得
+      const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
+      
+      if (gtag) {
+        // メタデータを構築
+        const metadata = {
+          id: gtag.id,
+          equipment: gtag.equipment,
+          name: gtag.name,
+          unit: gtag.unit || '',
+          description: gtag.description || '',
+          is_gtag: true,
+          type: gtag.type
+        };
         
-        if (start) {
-          query += ' AND timestamp >= ?';
-          params.push(new Date(start).toISOString());
+        if (shouldDisplay) {
+          metadata.display_name = gtag.description || gtag.name;
         }
         
-        if (end) {
-          query += ' AND timestamp <= ?';
-          params.push(new Date(end).toISOString());
-        }
-        
-        query += ' ORDER BY timestamp';
-        
-        // レコード数の上限を適用
-        query += ` LIMIT ${config.api.maxRecordsPerRequest}`;
-        
-        const tagData = db.prepare(query).all(...params);
+        // gtagのデータを計算
+        const gtagData = await getGtagData(gtag, { start, end });
         
         // タイムシフトを適用
-        const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+        const processedData = shouldTimeShift ? getTimeShiftedData(gtagData, true) : gtagData;
         
         result[tagId] = {
-          metadata: metadataMap[tagId],
+          metadata,
           data: processedData
         };
       }
@@ -675,6 +880,12 @@ async function startServer() {
     } = require('./utils/file-watcher');
     const { importSpecificCsvFile } = require('./utils/csv-importer');
     
+    // gtag機能の初期化
+    console.log('gtagシステムの初期化を開始します...');
+    initializeGtagSystem();
+    await loadAllGtagDefinitions();
+    console.log('gtagシステムの初期化が完了しました');
+    
     console.log('CSV変更の確認を開始します...');
     
     // 起動時にチェックサムベースで変更ファイルを検出
@@ -763,6 +974,28 @@ async function startServer() {
         }
       } catch (error) {
         console.error('翻訳ファイル監視処理中にエラーが発生しました:', error);
+      }
+    }, 300000); // 5分間隔
+    
+    // 5分おきにgtag定義ファイルを監視
+    console.log(`gtag定義ファイル監視を開始します (間隔: 5分)`);
+    
+    setInterval(async () => {
+      try {
+        const changedGtagFiles = detectChangedGtagFiles();
+        
+        if (changedGtagFiles.length > 0) {
+          console.log(`${changedGtagFiles.length}個のgtag定義ファイルの変更を検出しました`);
+          
+          for (const fileInfo of changedGtagFiles) {
+            console.log(`gtag定義「${fileInfo.name}」の更新を処理します (チェックサム: ${fileInfo.checksum.substring(0, 8)}...)`);
+            await importGtagDefinition(fileInfo);
+          }
+          
+          console.log('gtag定義の更新処理が完了しました');
+        }
+      } catch (error) {
+        console.error('gtag定義ファイル監視処理中にエラーが発生しました:', error);
       }
     }, 300000); // 5分間隔
   } catch (error) {

@@ -1,0 +1,17 @@
+{
+  "id": "Tank01.PredictedLevel",
+  "name": "PredictedLevel",
+  "description": "タンク01の30分後の水位予測",
+  "equipment": "Tank01",
+  "unit": "m",
+  "type": "python",
+  "script": "predict_level.py",
+  "function": "predict_future_level",
+  "parameters": {
+    "prediction_minutes": 30
+  },
+  "sourceTags": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "options": {
+    "cacheTime": 300
+  }
+}
