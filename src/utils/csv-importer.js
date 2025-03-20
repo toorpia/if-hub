@@ -5,6 +5,7 @@ const csv = require('csv-parser');
 const moment = require('moment');
 const { db } = require('../db');
 const config = require('../config');
+const { applyMetadataToTag } = require('./tag-metadata-importer');
 
 // CSVフォルダパス
 const CSV_FOLDER = config.dataSource.staticDataPath;
@@ -123,6 +124,9 @@ async function importCsvToDatabase() {
               max
             );
             
+            // タグにメタデータを適用
+            applyMetadataToTag(tagId, header);
+            
             totalTagCount++;
             
             // データポイントをバッチで挿入（チャンクに分割して処理）
@@ -148,10 +152,17 @@ async function importCsvToDatabase() {
                   const timestamp = moment(row[timestampColumn], [
                     'YYYY-MM-DD HH:mm:ss',
                     'YYYY/MM/DD HH:mm:ss',
+                    'YYYY/M/D H:mm',       // 1桁の日付や月、時間にも対応
+                    'YYYY/M/D H:mm:ss',    // 1桁の日付や月、時間にも対応
                     'MM/DD/YYYY HH:mm:ss',
                     'DD/MM/YYYY HH:mm:ss',
                     // 他のフォーマットも必要に応じて追加
                   ]).toISOString();
+                  
+                  // デバッグ用ログ
+                  if (dataPoints.length < 2) { // 最初の数行だけログ出力
+                    console.log(`    [DEBUG] 日時変換: ${row[timestampColumn]} -> ${timestamp}, 値: ${value}`);
+                  }
                   
                   dataPoints.push({
                     tagId,
@@ -200,12 +211,22 @@ async function importCsvToDatabase() {
  * @returns {Promise<Object>} ヘッダー行
  */
 async function getHeaderRow(filePath) {
+  console.log(`CSVヘッダー読み込みを開始: ${filePath}`);
+  // ファイルの内容を確認（デバッグ用）
+  const fileContent = fs.readFileSync(filePath, 'utf8').slice(0, 200);
+  console.log(`CSVファイル先頭部分: ${fileContent}`);
+  
   return new Promise((resolve, reject) => {
     let headerRow = null;
     const stream = fs.createReadStream(filePath)
-      .pipe(csv())
+      .pipe(csv({
+        separator: ',', // カンマをセパレータとして指定
+        skipLines: 0,   // スキップする行数
+        strict: false   // 厳密なチェックを無効化
+      }))
       .on('data', (row) => {
         headerRow = row;
+        console.log(`ヘッダー行が見つかりました: ${JSON.stringify(row).slice(0, 200)}`);
         stream.destroy(); // 最初の行を取得したらストリームを終了
       })
       .on('end', () => {
@@ -229,107 +250,111 @@ async function getHeaderRow(filePath) {
  * @returns {Promise<Object>} 処理結果（最小値、最大値、データポイント数）
  */
 async function processTagData(filePath, tagId, header, timestampColumn, equipmentId) {
-  return new Promise((resolve, reject) => {
+  try {
+    // 全データを読み込んで処理
+    const data = [];
     let min = Infinity;
     let max = -Infinity;
-    let count = 0;
-    let batch = [];
-    const BATCH_SIZE = 500; // より小さなバッチサイズに変更
     
-    // タグデータ用のステートメントを準備
-    const stmtData = db.prepare(`
-      INSERT OR REPLACE INTO tag_data (tag_id, timestamp, value)
-      VALUES (?, ?, ?)
-    `);
+    // まずCSVからデータを読み込み
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => {
+          const value = parseFloat(row[header]);
+          if (!isNaN(value)) {
+            // 最小値と最大値を更新
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+            
+            try {
+              // 日時フォーマット変換
+              const timestamp = moment(row[timestampColumn], [
+                'YYYY-MM-DD HH:mm:ss',
+                'YYYY/MM/DD HH:mm:ss',
+                'YYYY/M/D H:mm',
+                'YYYY/M/D H:mm:ss',
+                'MM/DD/YYYY HH:mm:ss',
+                'DD/MM/YYYY HH:mm:ss',
+              ]).toISOString();
+              
+              // 最初の数件だけデバッグログを出力
+              if (data.length < 2) {
+                console.log(`    [DEBUG] 処理中: ${row[timestampColumn]} -> ${timestamp}, 値: ${value}`);
+              }
+              
+              data.push({
+                timestamp,
+                value
+              });
+            } catch (err) {
+              console.warn(`    日時の解析に失敗しました: ${row[timestampColumn]}`);
+            }
+          }
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
     
-    // タグ用のステートメントを準備
-    const stmtTag = db.prepare(`
-      INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+    if (data.length === 0) {
+      console.log(`    有効な数値データがありません。スキップします。`);
+      return { min: 0, max: 0, count: 0 };
+    }
     
-    // トランザクション開始
+    // タグを登録してからデータを挿入する
     db.exec('BEGIN TRANSACTION');
     
-    fs.createReadStream(filePath)
-      .pipe(csv())
-      .on('data', (row) => {
-        const value = parseFloat(row[header]);
-        if (!isNaN(value)) {
-          // 最小値と最大値を更新
-          min = Math.min(min, value);
-          max = Math.max(max, value);
-          
-          try {
-            // 日時フォーマット変換
-            const timestamp = moment(row[timestampColumn], [
-              'YYYY-MM-DD HH:mm:ss',
-              'YYYY/MM/DD HH:mm:ss',
-              'MM/DD/YYYY HH:mm:ss',
-              'DD/MM/YYYY HH:mm:ss',
-              // 他のフォーマットも必要に応じて追加
-            ]).toISOString();
-            
-            // バッチに追加
-            batch.push({
-              tagId,
-              timestamp,
-              value
-            });
-            count++;
-            
-            // バッチサイズに達したらDBに挿入
-            if (batch.length >= BATCH_SIZE) {
-              for (const point of batch) {
-                stmtData.run(point.tagId, point.timestamp, point.value);
-              }
-              batch = []; // バッチをクリア
-              
-              // 定期的にコミットして新しいトランザクションを開始（メモリ解放）
-              db.exec('COMMIT');
-              db.exec('BEGIN TRANSACTION');
-            }
-          } catch (err) {
-            console.warn(`    日時の解析に失敗しました: ${row[timestampColumn]}`);
-          }
+    try {
+      // まずタグレコードを作成
+      const stmtTag = db.prepare(`
+        INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      stmtTag.run(
+        tagId,
+        equipmentId,
+        header,
+        header,
+        guessUnit(header),
+        min === Infinity ? 0 : min,
+        max === -Infinity ? 0 : max
+      );
+      
+      // タグにメタデータを適用
+      applyMetadataToTag(tagId, header);
+      
+      // 次にデータポイントを挿入
+      const stmtData = db.prepare(`
+        INSERT OR REPLACE INTO tag_data (tag_id, timestamp, value)
+        VALUES (?, ?, ?)
+      `);
+      
+      // データポイントをバッチで挿入
+      const insertBatch = db.transaction((points) => {
+        for (const point of points) {
+          stmtData.run(tagId, point.timestamp, point.value);
         }
-      })
-      .on('end', () => {
-        try {
-          // 残りのバッチを処理
-          if (batch.length > 0) {
-            for (const point of batch) {
-              stmtData.run(point.tagId, point.timestamp, point.value);
-            }
-          }
-          
-          // タグレコード更新
-          if (count > 0) {
-            stmtTag.run(
-              tagId,
-              equipmentId,
-              header,
-              header,
-              guessUnit(header),
-              min === Infinity ? 0 : min,
-              max === -Infinity ? 0 : max
-            );
-          }
-          
-          // トランザクション完了
-          db.exec('COMMIT');
-          console.log(`    ${count} データポイントを挿入しました`);
-          resolve({ min, max, count });
-        } catch (error) {
-          db.exec('ROLLBACK');
-          reject(error);
-        }
-      })
-      .on('error', (err) => {
-        db.exec('ROLLBACK');
-        reject(err);
       });
-  });
+      
+      // データポイントをチャンクに分割して挿入
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+        const chunk = data.slice(i, i + CHUNK_SIZE);
+        insertBatch(chunk);
+      }
+      
+      db.exec('COMMIT');
+      console.log(`    ${data.length} データポイントを挿入しました`);
+      
+      return { min, max, count: data.length };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    throw error;
+  }
 }
 
 /**
@@ -344,23 +369,48 @@ async function importSpecificCsvFile(fileInfo) {
     const equipmentId = fileInfo.equipmentId;
     const filePath = fileInfo.path;
     
-    // ヘッダー行のみを取得（ストリーミングで効率的に）
-    let headerRow;
-    try {
-      headerRow = await getHeaderRow(filePath);
-    } catch (error) {
+    console.log(`ファイル ${filePath} を読み込みます`);
+    
+    // CSVファイルの内容を直接読んでヘッダーを確認（デバッグ）
+    const fileContent = fs.readFileSync(filePath, 'utf8').slice(0, 200);
+    console.log(`CSVファイル先頭部分: ${fileContent}`);
+    
+    // CSVファイルを読み込む
+    const rows = [];
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => {
+          // デバッグ出力（最初の数行のみ）
+          if (rows.length < 2) {
+            console.log(`データ行サンプル: ${JSON.stringify(row)}`);
+          }
+          rows.push(row);
+        })
+        .on('end', () => {
+          console.log(`  ${filePath} から ${rows.length} 行を読み込みました`);
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error(`  CSVファイル読み込みエラー: ${err.message}`);
+          reject(err);
+        });
+    });
+    
+    if (rows.length === 0) {
       console.log(`  ${fileInfo.name} はデータがありません。スキップします。`);
       return { tagCount: 0, dataPointCount: 0 };
     }
     
     // ヘッダー（タグ名）を取得
-    const headers = Object.keys(headerRow);
+    const headers = Object.keys(rows[0]);
+    console.log(`検出されたヘッダー: ${headers.join(', ').slice(0, 200)}...`);
     
     // タイムスタンプ列を特定
     const timestampColumn = headers.find(h => 
       h.toLowerCase().includes('time') || 
       h.toLowerCase().includes('date')
-    ) || headers[0];
+    ) || headers[0]; // 見つからない場合は最初の列を使用
     
     // タグ名だけを抽出（タイムスタンプ列を除く）
     const tagHeaders = headers.filter(h => h !== timestampColumn);
