@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025 toorPIA / toor Inc.
 """
 移動平均計算プロセッサ
 

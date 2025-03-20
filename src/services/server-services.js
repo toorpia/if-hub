@@ -1,4 +1,5 @@
 // src/services/server-services.js
+// Copyright (c) 2025 toorPIA / toor Inc.
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');

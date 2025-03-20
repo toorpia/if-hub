@@ -1,4 +1,5 @@
 // src/db.js
+// Copyright (c) 2025 toorPIA / toor Inc.
 const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs-extra');

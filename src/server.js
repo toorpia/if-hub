@@ -1,4 +1,5 @@
 // src/server.js
+// Copyright (c) 2025 toorPIA / toor Inc.
 const app = require('./app');
 const config = require('./config');
 const { initializeServer, setupFileWatchers } = require('./services/server-services');
