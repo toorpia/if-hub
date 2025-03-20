@@ -1,4 +1,5 @@
 // src/config.js
+// Copyright (c) 2025 toorPIA / toor Inc.
 const path = require('path');
 
 module.exports = {

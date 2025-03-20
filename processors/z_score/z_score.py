@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025 toorPIA / toor Inc.
 import json
 import argparse
 import numpy as np
