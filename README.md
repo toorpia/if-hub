@@ -6,7 +6,6 @@ IndustryFlow Hub（IF-HUB）は、製造設備の時系列データを安全か�
 
 また、Python、Rust、Go、C/C++など、各種言語で作成された外部プログラムを取り込むことが可能で、高度なデータ処理を柔軟に拡張できます。
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## 存在価値と使命
 
