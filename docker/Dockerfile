@@ -9,7 +9,7 @@ COPY package*.json ./
 RUN npm install
 
 # 必要なディレクトリを作成し、適切な権限を設定
-RUN mkdir -p /app/pi_data /app/logs /app/db \
+RUN mkdir -p /app/static_equipment_data /app/logs /app/db \
     && chown -R node:node /app
 
 # ユーザー権限の設定を削除して、rootとして実行できるようにする
