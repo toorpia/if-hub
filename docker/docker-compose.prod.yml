@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  datastream-hub:
+  if-hub:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: datastream-hub-prod
+    container_name: if-hub-prod
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"
     volumes:

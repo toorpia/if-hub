@@ -1,5 +1,5 @@
 {
-  "name": "datastream-hub",
+  "name": "if-hub",
   "version": "1.0.0",
   "description": "A hub for managing and serving time-series data from industrial equipment",
   "main": "src/server.js",

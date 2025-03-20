@@ -1,10 +1,10 @@
-# DataStream Hub への貢献ガイドライン
+# IndustryFlow Hub (IF-HUB) への貢献ガイドライン
 
-DataStream Hubプロジェクトへの貢献に興味をお持ちいただき、ありがとうございます！このガイドラインでは、プロジェクトへの貢献方法について説明します。
+IF-Hubプロジェクトへの貢献に興味をお持ちいただき、ありがとうございます！このガイドラインでは、プロジェクトへの貢献方法について説明します。
 
 ## コントリビューション方法
 
-DataStream Hubへの貢献方法はいくつかあります：
+IF-Hubへの貢献方法はいくつかあります：
 
 1. バグの報告
 2. 機能の提案
@@ -18,7 +18,7 @@ DataStream Hubへの貢献方法はいくつかあります：
 
 ### バグ報告の場合
 
-- DataStream Hubのバージョン
+- IF-Hubのバージョン
 - 使用している環境（OS、Node.jsバージョンなど）
 - 問題の詳細な説明
 - 問題を再現する手順
@@ -53,8 +53,8 @@ DataStream Hubへの貢献方法はいくつかあります：
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/toorpia/datastream-hub.git
-cd datastream-hub
+git clone https://github.com/toorpia/if-hub.git
+cd if-hub
 
 # 依存関係のインストール
 npm install

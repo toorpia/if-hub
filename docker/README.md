@@ -1,12 +1,12 @@
-# Docker環境でのDataStream Hub実行ガイド
+# Docker環境でのIndustryFlow Hub (IF-HUB)実行ガイド
 
-このディレクトリには、DataStream HubをDocker環境で実行するための設定ファイルが含まれています。
+このディレクトリには、IndustryFlow Hub（IF-HUB）をDocker環境で実行するための設定ファイルが含まれています。
 
 ## Docker構成ファイル
 
 - `docker-compose.yml` - 開発環境用のDocker Compose設定
 - `docker-compose.prod.yml` - 本番環境用のDocker Compose設定
-- `Dockerfile` - DataStream Hubコンテナのビルド定義
+- `Dockerfile` - IF-HUBコンテナのビルド定義
 
 ## コンテナ構成
 
@@ -99,8 +99,8 @@ EXTERNAL_PORT=8080 docker-compose up -d
 
 1. ボリュームマウントが正しく設定されているか確認
    ```bash
-   docker-compose exec datastream-hub ls -la /app/pi_data
-   docker-compose exec datastream-hub ls -la /app/db
+   docker-compose exec if-hub ls -la /app/pi_data
+   docker-compose exec if-hub ls -la /app/db
    ```
 
 2. ファイルの権限を確認
@@ -111,7 +111,7 @@ EXTERNAL_PORT=8080 docker-compose up -d
 
 3. コンテナ内でチェックサムファイルが作成されているか確認
    ```bash
-   docker-compose exec datastream-hub ls -la /app/db/file_checksums.json
+   docker-compose exec if-hub ls -la /app/db/file_checksums.json
    ```
 
 4. ファイル監視のログを確認

@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  datastream-hub:
+  if-hub:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: datastream-hub
+    container_name: if-hub
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
     volumes:
@@ -19,6 +19,6 @@ services:
       - NODE_ENV=development
       - PORT=3000
       - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
-      - DB_PATH=/app/db/datastream_hub.db  # データベースファイルのパス
+      - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
     restart: unless-stopped
     # rootとして実行するため、user設定を削除

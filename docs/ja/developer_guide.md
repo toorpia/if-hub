@@ -1,4 +1,4 @@
-# DataStream Hub 開発者ガイド
+# IndustryFlow Hub (IF-HUB) 開発者ガイド
 
 ## 目次
 
@@ -10,7 +10,7 @@
 
 ## アーキテクチャ概要
 
-DataStream Hubは、以下のコンポーネントで構成されるモジュラー設計を採用しています：
+IF-HUBは、以下のコンポーネントで構成されるモジュラー設計を採用しています：
 
 ### コンポーネント構成
 
@@ -72,7 +72,7 @@ DataStream Hubは、以下のコンポーネントで構成されるモジュラ
 
 ## データベース設計
 
-DataStream Hubは、SQLiteデータベースを使用して時系列データとメタデータを格納します。
+IF-HUBは、SQLiteデータベースを使用して時系列データとメタデータを格納します。
 
 ### テーブル構造
 
@@ -198,7 +198,7 @@ async function startServer() {
     
     // 3. サーバーを起動し、ポートでリッスン開始
     app.listen(PORT, () => {
-      console.log(`DataStream Hub Server running on port ${PORT}`);
+      console.log(`IndustryFlow Hub (IF-HUB) Server running on port ${PORT}`);
       console.log(`Environment: ${config.environment}`);
       // ...その他のログ出力
     });
@@ -226,7 +226,7 @@ CSVからデータを読み込み、SQLiteデータベースに取り込むロ�
 
 ### タグIDとソースタグの関係
 
-DataStream Hubでは、タグには2つの識別子があります：
+IF-HUBでは、タグには2つの識別子があります：
 
 1. **タグID**: `{設備名}.{タグ名}`という形式のシステム内での一意識別子（例：`Pump01.Temperature`）
 2. **ソースタグ（source_tag）**: CSVファイルの元のカラム名（例：`Temperature`）
@@ -253,7 +253,7 @@ stmtTag.run(
 
 ### 大規模CSVファイル処理の最適化
 
-DataStream Hubは、大規模なCSVファイルを効率的に処理するための最適化が実装されています：
+IF-HUBは、大規模なCSVファイルを効率的に処理するための最適化が実装されています：
 
 #### ストリーミング処理方式
 
@@ -341,11 +341,11 @@ staticDataPath: process.env.STATIC_DATA_PATH ||
     : path.join(process.cwd(), 'static_equipment_data')),
 ```
 
-これらの最適化により、DataStream Hubは大規模CSVファイルを効率的に処理し、メモリ使用量を抑えながら正確なデータ取り込みを実現しています。
+これらの最適化により、IF-HUBは大規模CSVファイルを効率的に処理し、メモリ使用量を抑えながら正確なデータ取り込みを実現しています。
 
 ### ファイル監視と動的データ更新
 
-DataStream Hubには、サーバー実行中にCSVファイルの変更を検出して自動的にデータを更新する機能があります：
+IF-HUBには、サーバー実行中にCSVファイルの変更を検出して自動的にデータを更新する機能があります：
 
 #### ファイル監視システム（src/utils/file-watcher.js）
 
@@ -438,7 +438,7 @@ setInterval(async () => {
 
 ### タグメタデータ管理
 
-DataStream Hubは、タグ表示名を管理するために柔軟なメタデータシステムを提供しています。
+IF-HUBは、タグ表示名を管理するために柔軟なメタデータシステムを提供しています。
 
 #### タグメタデータのインポート（src/utils/tag-metadata-importer.js）
 

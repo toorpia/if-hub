@@ -1,8 +1,8 @@
-# DataStream Hub API マニュアル
+# IndustryFlow Hub API マニュアル
 
 ## 目次
 
-- [DataStream Hub API マニュアル](#datastream-hub-api-マニュアル)
+- [IndustryFlow Hub API マニュアル](#industryflow-hub-api-マニュアル)
   - [目次](#目次)
   - [API概要](#api概要)
     - [ベースURL](#ベースurl)
@@ -52,7 +52,7 @@
 
 ## API概要
 
-DataStream Hubは、製造設備の時系列データにアクセスするためのRESTful APIを提供しています。全てのAPIエンドポイントは、標準的なHTTPメソッドとJSONレスポンス形式を使用しています。
+IndustryFlow Hub (IF-HUB) は、製造設備の時系列データにアクセスするためのRESTful APIを提供しています。全てのAPIエンドポイントは、標準的なHTTPメソッドとJSONレスポンス形式を使用しています。
 
 ### ベースURL
 
@@ -107,7 +107,7 @@ GET /api/system/info
 
 ```json
 {
-  "name": "DataStream Hub",
+  "name": "IndustryFlow Hub",
   "version": "1.0.0",
   "tagCount": 48,
   "equipmentCount": 3,
@@ -899,7 +899,7 @@ APIの成功レスポンスはJSON形式で返されます。レスポンスの�
 
 ## 表示名オプション
 
-DataStream HubはタグIDに対する表示名マッピングをサポートしています。これにより、生のタグID（例: `Pump01.Temperature`）を人間が読みやすい名前（例: `ポンプ01.温度`）に変換できます。
+IF-HUBはタグIDに対する表示名マッピングをサポートしています。これにより、生のタグID（例: `Pump01.Temperature`）を人間が読みやすい名前（例: `ポンプ01.温度`）に変換できます。
 
 ### display パラメータの使用方法
 
@@ -954,7 +954,7 @@ GET /api/data/Pump01.Temperature?display=true&showUnit=false
 
 ### タグメタデータファイルの動的更新
 
-DataStream Hubは、サーバーの実行中にタグメタデータファイルが更新された場合、自動的に変更を検出して反映します。
+IF-HUBは、サーバーの実行中にタグメタデータファイルが更新された場合、自動的に変更を検出して反映します。
 
 - タグメタデータファイルは `tag_metadata` ディレクトリ内の `translations_[言語コード].csv` という命名規則のCSVファイルです
 - サーバー起動時に既存のタグメタデータファイルが読み込まれます
@@ -968,8 +968,8 @@ DataStream Hubは、サーバーの実行中にタグメタデータファイル
 ### Node.js クライアント実装例
 
 ```javascript
-// datastream-hub-client.js
-class DataStreamHubClient {
+// if-hub-client.js
+class IFHUBClient {
   constructor(baseUrl = 'http://localhost:3001/api') {
     this.baseUrl = baseUrl;
   }
@@ -1062,21 +1062,21 @@ class DataStreamHubClient {
 
 // Node.js環境とブラウザ環境の両方でエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = DataStreamHubClient;
+  module.exports = IFHUBClient;
 } else {
-  window.DataStreamHubClient = DataStreamHubClient;
+  window.IFHUBClient = IFHUBClient;
 }
 ```
 
 ### Python クライアント実装例
 
 ```python
-# datastream_hub_client.py
+# if_hub_client.py
 import requests
 from datetime import datetime
 import json
 
-class DataStreamHubClient:
+class IFHUBClient:
     def __init__(self, base_url='http://localhost:3001/api'):
         self.base_url = base_url
         

@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const config = require('./config');
 
 // データベースファイルのパス
-const DB_PATH = process.env.DB_PATH || path.join(config.dataSource.staticDataPath, '../db/datastream_hub.db');
+const DB_PATH = process.env.DB_PATH || path.join(config.dataSource.staticDataPath, '../db/if_hub.db');
 
 // データディレクトリの確保
 const dbDir = path.dirname(DB_PATH);
