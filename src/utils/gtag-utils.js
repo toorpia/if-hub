@@ -483,101 +483,139 @@ function calculateExpressionData(expression, inputTagsData) {
 }
 
 /**
- * カスタムPython関数を実行
+ * カスタム処理スクリプトを実行
  * @param {string} implementationPath - 実装ファイルパス
- * @param {string} functionName - 関数名
- * @param {Object} params - 関数パラメータ
+ * @param {Array} args - コマンドライン引数
  * @param {Object} inputTagsData - 入力タグのデータ
  * @returns {Promise<Array>} 実行結果
  */
-async function executeCustomImplementation(implementationPath, functionName, params, inputTagsData) {
-  try {
-    // 実装ファイルの存在確認
-    if (!fs.existsSync(implementationPath)) {
-      throw new Error(`実装ファイル「${implementationPath}」が見つかりません`);
-    }
-    
-    console.log(`カスタム実装を実行します: ${path.basename(implementationPath)} (関数: ${functionName})`);
-    
-    // 一時ファイルに入力データを書き込む
-    const inputFile = path.join(os.tmpdir(), `gtag_input_${Date.now()}.json`);
-    const outputFile = path.join(os.tmpdir(), `gtag_output_${Date.now()}.json`);
-    
-    await fs.writeJson(inputFile, { inputTagsData, params });
-    
-    // 実行結果の保存先
-    let result = [];
-    
+async function executeCustomImplementation(implementationPath, args, inputTagsData) {
+  return new Promise((resolve, reject) => {
     try {
-      // スクリプトを実行
-      await new Promise((resolve, reject) => {
-        // コマンドライン引数の構築
-        const args = [
-          implementationPath,
-          '--function', functionName,
-          '--input', inputFile,
-          '--output', outputFile
-        ];
-        
-        // 環境に応じてpython3またはpythonコマンドを使用
-        const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-        
-        console.log(`Python実行コマンド: ${pythonCommand} ${args.join(' ')}`);
-        
-        const proc = spawn(pythonCommand, args);
-        
-        let stderr = '';
-        let stdout = '';
-        
-        proc.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-        
-        proc.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-        
-        proc.on('close', (code) => {
-          if (code === 0) {
-            if (stdout.trim()) {
-              console.log(`Python実行 (標準出力):\n${stdout}`);
-            }
-            resolve();
-          } else {
-            reject(new Error(`Python実行エラー (終了コード ${code}):\n${stderr}`));
-          }
-        });
-        
-        proc.on('error', (err) => {
-          reject(new Error(`Python実行プロセスエラー: ${err.message}`));
-        });
+      // 実装ファイルの存在確認
+      if (!fs.existsSync(implementationPath)) {
+        throw new Error(`実装ファイル「${implementationPath}」が見つかりません`);
+      }
+      
+      console.log(`カスタム実装を実行します: ${path.basename(implementationPath)} (引数: ${args.join(' ')})`);
+      
+      // 実行ファイルの権限を確認し、必要に応じて調整
+      try {
+        fs.accessSync(implementationPath, fs.constants.X_OK);
+      } catch (err) {
+        // 実行権限がない場合は付与を試みる
+        console.warn(`実行ファイル「${implementationPath}」に実行権限を付与します`);
+        try {
+          fs.chmodSync(implementationPath, '755');
+        } catch (chmodErr) {
+          throw new Error(`実行権限の付与に失敗しました: ${chmodErr.message}`);
+        }
+      }
+      
+      // 引数付きでプロセスを実行
+      const proc = spawn(implementationPath, args);
+      
+      // すべてのタイムスタンプを収集して一意にする
+      const allTimestamps = new Set();
+      Object.values(inputTagsData).forEach(points => {
+        points.forEach(point => allTimestamps.add(point.timestamp));
       });
       
-      // 結果を読み込む
-      if (fs.existsSync(outputFile)) {
-        try {
-          result = await fs.readJson(outputFile);
-        } catch (readError) {
-          throw new Error(`出力ファイルの読み込みエラー: ${readError.message}`);
+      // タイムスタンプでソート
+      const sortedTimestamps = Array.from(allTimestamps).sort();
+      
+      // 各タイムスタンプでの全てのタグの値を行として書き込む
+      const inputTagNames = Object.keys(inputTagsData);
+      
+      let i = 0;
+      const writeNext = () => {
+        if (i < sortedTimestamps.length) {
+          const timestamp = sortedTimestamps[i++];
+          
+          // このタイムスタンプにおける各タグの値を収集
+          const values = inputTagNames.map(tagName => {
+            const point = inputTagsData[tagName].find(p => p.timestamp === timestamp);
+            return point ? point.value : 'null';
+          });
+          
+          // timestamp,value1,value2,... 形式の行を作成
+          const line = `${timestamp},${values.join(',')}\n`;
+          
+          // バックプレッシャーがあれば待機
+          const canContinue = proc.stdin.write(line);
+          if (canContinue) {
+            process.nextTick(writeNext);
+          } else {
+            proc.stdin.once('drain', writeNext);
+          }
+        } else {
+          proc.stdin.end();
         }
-      } else {
-        throw new Error(`出力ファイル「${outputFile}」が見つかりません`);
+      };
+      
+      // データの書き込みを開始
+      writeNext();
+      
+      // ストリーミング出力処理
+      const results = [];
+      let outputBuffer = '';
+      
+      proc.stdout.on('data', (chunk) => {
+        outputBuffer += chunk.toString();
+        processOutputBuffer();
+      });
+      
+      function processOutputBuffer() {
+        const lines = outputBuffer.split('\n');
+        outputBuffer = lines.pop() || '';  // 最後の不完全な行を保持
+        
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const [timestamp, valueStr] = line.split(',');
+              const value = parseFloat(valueStr);
+              
+              if (!isNaN(value)) {
+                results.push({
+                  timestamp,
+                  value
+                });
+              }
+            } catch (err) {
+              console.warn(`無効な出力行: ${line}`);
+            }
+          }
+        }
       }
-    } finally {
-      // 一時ファイルを削除
-      try {
-        if (fs.existsSync(inputFile)) await fs.remove(inputFile);
-        if (fs.existsSync(outputFile)) await fs.remove(outputFile);
-      } catch (cleanupError) {
-        console.warn(`一時ファイルの削除中にエラーが発生しました: ${cleanupError.message}`);
-      }
+      
+      // エラー処理
+      let stderr = '';
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      // 完了処理
+      proc.on('close', (code) => {
+        // 残りのバッファを処理
+        if (outputBuffer) {
+          processOutputBuffer();
+        }
+        
+        if (code === 0) {
+          resolve(results);
+        } else {
+          reject(new Error(`プロセスが終了コード ${code} で終了しました: ${stderr}`));
+        }
+      });
+      
+      proc.on('error', (err) => {
+        reject(new Error(`プロセス実行エラー: ${err.message}`));
+      });
+      
+    } catch (error) {
+      reject(new Error(`カスタム実装実行中にエラー: ${error.message}`));
     }
-    
-    return result;
-  } catch (error) {
-    console.error(`カスタム実装実行中にエラーが発生しました (${path.basename(implementationPath)}):`, error);
-    throw error;
-  }
+  });
 }
 
 /**
@@ -687,37 +725,63 @@ async function getGtagData(gtag, options = {}) {
       case 'python': // pythonタイプはcustomタイプと同じ処理を行う
       case 'custom':
         // カスタム実装（Pythonなど）
-        if (!definition.implementation && !definition.bin) {
-          throw new Error(`${gtag.name}: カスタム実装にはimplementationまたはbinフィールドが必要です`);
-        }
+        // 実行ファイルパスの決定（progフィールドを優先）
+        let progPath = definition.prog;
         
-        // 実装ファイルパスを決定
-        const implPath = definition.implementation || definition.bin;
+        // 後方互換性のために、progがなければimplementationまたはbinを使用
+        if (!progPath) {
+          progPath = definition.implementation || definition.bin;
+          if (!progPath) {
+            throw new Error(`${gtag.name}: 実行ファイルのパスが指定されていません。progフィールドを設定してください。`);
+          }
+        }
         
         // gtagディレクトリからの相対パスを構築
         let scriptPath;
-        if (path.isAbsolute(implPath)) {
-          scriptPath = implPath;
+        if (path.isAbsolute(progPath)) {
+          scriptPath = progPath;
         } else {
           // binディレクトリ内にあるか確認
-          const binPath = path.join(GTAG_DIR, gtag.name, 'bin', implPath);
-          const directPath = path.join(GTAG_DIR, gtag.name, implPath);
+          const binPath = path.join(GTAG_DIR, gtag.name, 'bin', progPath);
+          const directPath = path.join(GTAG_DIR, gtag.name, progPath);
           
           if (fs.existsSync(binPath)) {
             scriptPath = binPath;
           } else if (fs.existsSync(directPath)) {
             scriptPath = directPath;
           } else {
-            throw new Error(`${gtag.name}: 実装ファイル「${implPath}」が見つかりません。パス「${binPath}」と「${directPath}」を確認しました。`);
+            throw new Error(`${gtag.name}: 実行ファイル「${progPath}」が見つかりません。パス「${binPath}」と「${directPath}」を確認しました。`);
           }
         }
         
         console.log(`${gtag.name}: スクリプト実行パス: ${scriptPath}`);
         
+        // 引数を準備
+        let args = [];
+        
+        // argsフィールドがあればそれを使用
+        if (Array.isArray(definition.args)) {
+          args = [...definition.args];
+        } 
+        // 後方互換性のための処理
+        else {
+          // functionフィールドがあれば第一引数として追加
+          if (definition.function) {
+            args.push(definition.function);
+          }
+          
+          // paramsがあれば、それを引数形式に変換
+          if (definition.params && typeof definition.params === 'object') {
+            Object.entries(definition.params).forEach(([key, value]) => {
+              args.push(`--${key}=${value}`);
+            });
+          }
+        }
+        
+        // スクリプトを実行
         gtagData = await executeCustomImplementation(
           scriptPath,
-          definition.function || 'process',
-          definition.params || {},
+          args,
           inputTagsData
         );
         break;
