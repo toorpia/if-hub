@@ -227,15 +227,41 @@ async function loadAllGtagDefinitions() {
 }
 
 /**
+ * タグ参照パターンを標準形式に変換
+ * @param {string} expression - 評価する式
+ * @param {Array} inputTags - 入力タグの配列
+ * @returns {string} 変換後の式
+ */
+function normalizeExpression(expression, inputTags) {
+  let normalizedExpr = expression;
+  
+  // タグ名形式 (Pump01.Flow) を inputs[n] 形式に変換
+  if (inputTags && inputTags.length > 0) {
+    for (let i = 0; i < inputTags.length; i++) {
+      const tagName = inputTags[i];
+      const escapedTagName = tagName.replace(/\./g, '\\.');
+      const pattern = new RegExp(escapedTagName, 'g');
+      normalizedExpr = normalizedExpr.replace(pattern, `inputs[${i}]`);
+    }
+  }
+  
+  return normalizedExpr;
+}
+
+/**
  * 式を評価
  * @param {string} expression - 評価する式
  * @param {Array} inputValues - 入力値の配列
+ * @param {Array} inputTags - 入力タグの配列（オプション）
  * @returns {number} 計算結果
  */
-function evaluateExpression(expression, inputValues) {
+function evaluateExpression(expression, inputValues, inputTags = []) {
   try {
+    // 式内のタグ名を標準形式に変換
+    const normalizedExpr = normalizeExpression(expression, inputTags);
+    
     // inputs[0], inputs[1]などの参照を実際の値に置換
-    let evalReady = expression;
+    let evalReady = normalizedExpr;
     
     // inputs[n]形式の参照を置換
     for (let i = 0; i < inputValues.length; i++) {
@@ -244,7 +270,12 @@ function evaluateExpression(expression, inputValues) {
     }
     
     // 計算式を評価
-    return mathjs.evaluate(evalReady);
+    try {
+      return mathjs.evaluate(evalReady);
+    } catch (mathError) {
+      // mathjs固有のエラーをより明確にログ
+      throw new Error(`${mathError.message} (解析された式: ${evalReady})`);
+    }
   } catch (error) {
     console.error(`式の評価中にエラーが発生しました: ${expression}`, error);
     throw error;
@@ -399,13 +430,19 @@ function calculateExpressionData(expression, inputTagsData) {
   // 各タイムスタンプでの計算結果を保持
   const result = [];
   
+  // 入力タグのID配列
+  const inputTagIds = Object.keys(inputTagsData);
+  
+  // 検証用のエラーカウンタ（同じエラーの繰り返し出力を防ぐ）
+  const errorCounts = {};
+  
   for (const timestamp of sortedTimestamps) {
     // このタイムスタンプでの各タグの値を取得
     const inputValues = [];
     let allInputsHaveData = true;
     
-    for (let i = 0; i < Object.keys(inputTagsData).length; i++) {
-      const tagId = Object.keys(inputTagsData)[i];
+    for (let i = 0; i < inputTagIds.length; i++) {
+      const tagId = inputTagIds[i];
       const tagData = inputTagsData[tagId];
       
       // 最も近いデータポイントを探す
@@ -422,13 +459,22 @@ function calculateExpressionData(expression, inputTagsData) {
     if (allInputsHaveData) {
       // 式を評価
       try {
-        const value = evaluateExpression(expression, inputValues);
+        const value = evaluateExpression(expression, inputValues, inputTagIds);
         result.push({
           timestamp,
           value
         });
       } catch (error) {
-        console.error(`式の評価中にエラーが発生しました: ${expression}`, error);
+        // エラー数をカウント
+        const errorKey = error.message;
+        errorCounts[errorKey] = (errorCounts[errorKey] || 0) + 1;
+        
+        // 同じエラーは最初の数回だけ詳細にログ
+        if (errorCounts[errorKey] <= 3) {
+          console.error(`式の評価中にエラーが発生しました: ${expression}`, error);
+        } else if (errorCounts[errorKey] === 4) {
+          console.error(`式の評価エラーが多数発生しています。以降は抑制します: ${expression}`);
+        }
       }
     }
   }
@@ -446,6 +492,13 @@ function calculateExpressionData(expression, inputTagsData) {
  */
 async function executeCustomImplementation(implementationPath, functionName, params, inputTagsData) {
   try {
+    // 実装ファイルの存在確認
+    if (!fs.existsSync(implementationPath)) {
+      throw new Error(`実装ファイル「${implementationPath}」が見つかりません`);
+    }
+    
+    console.log(`カスタム実装を実行します: ${path.basename(implementationPath)} (関数: ${functionName})`);
+    
     // 一時ファイルに入力データを書き込む
     const inputFile = path.join(os.tmpdir(), `gtag_input_${Date.now()}.json`);
     const outputFile = path.join(os.tmpdir(), `gtag_output_${Date.now()}.json`);
@@ -458,24 +511,24 @@ async function executeCustomImplementation(implementationPath, functionName, par
     try {
       // スクリプトを実行
       await new Promise((resolve, reject) => {
-        // 実装ファイルのフルパスを解決
-        const scriptFullPath = path.isAbsolute(implementationPath) 
-          ? implementationPath 
-          : path.resolve(GTAG_DIR, implementationPath);
-        
-        if (!fs.existsSync(scriptFullPath)) {
-          reject(new Error(`実装ファイル「${scriptFullPath}」が見つかりません`));
-          return;
-        }
-        
-        const proc = spawn('python', [
-          scriptFullPath,
+        // コマンドライン引数の構築
+        const args = [
+          implementationPath,
           '--function', functionName,
           '--input', inputFile,
           '--output', outputFile
-        ]);
+        ];
+        
+        console.log(`Python実行コマンド: python ${args.join(' ')}`);
+        
+        const proc = spawn('python', args);
         
         let stderr = '';
+        let stdout = '';
+        
+        proc.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
         
         proc.stderr.on('data', (data) => {
           stderr += data.toString();
@@ -483,30 +536,43 @@ async function executeCustomImplementation(implementationPath, functionName, par
         
         proc.on('close', (code) => {
           if (code === 0) {
+            if (stdout.trim()) {
+              console.log(`Python実行 (標準出力):\n${stdout}`);
+            }
             resolve();
           } else {
-            reject(new Error(`Python実行エラー: ${stderr}`));
+            reject(new Error(`Python実行エラー (終了コード ${code}):\n${stderr}`));
           }
         });
         
         proc.on('error', (err) => {
-          reject(err);
+          reject(new Error(`Python実行プロセスエラー: ${err.message}`));
         });
       });
       
       // 結果を読み込む
       if (fs.existsSync(outputFile)) {
-        result = await fs.readJson(outputFile);
+        try {
+          result = await fs.readJson(outputFile);
+        } catch (readError) {
+          throw new Error(`出力ファイルの読み込みエラー: ${readError.message}`);
+        }
+      } else {
+        throw new Error(`出力ファイル「${outputFile}」が見つかりません`);
       }
     } finally {
       // 一時ファイルを削除
-      if (fs.existsSync(inputFile)) await fs.remove(inputFile);
-      if (fs.existsSync(outputFile)) await fs.remove(outputFile);
+      try {
+        if (fs.existsSync(inputFile)) await fs.remove(inputFile);
+        if (fs.existsSync(outputFile)) await fs.remove(outputFile);
+      } catch (cleanupError) {
+        console.warn(`一時ファイルの削除中にエラーが発生しました: ${cleanupError.message}`);
+      }
     }
     
     return result;
   } catch (error) {
-    console.error(`カスタム実装実行中にエラーが発生しました:`, error);
+    console.error(`カスタム実装実行中にエラーが発生しました (${path.basename(implementationPath)}):`, error);
     throw error;
   }
 }
@@ -615,19 +681,38 @@ async function getGtagData(gtag, options = {}) {
         );
         break;
         
+      case 'python': // pythonタイプはcustomタイプと同じ処理を行う
       case 'custom':
         // カスタム実装（Pythonなど）
-        if (!definition.implementation) {
-          throw new Error('カスタム実装には実装ファイルパスが必要です');
+        if (!definition.implementation && !definition.bin) {
+          throw new Error(`${gtag.name}: カスタム実装にはimplementationまたはbinフィールドが必要です`);
         }
         
+        // 実装ファイルパスを決定
+        const implPath = definition.implementation || definition.bin;
+        
         // gtagディレクトリからの相対パスを構築
-        const implementationPath = path.isAbsolute(definition.implementation)
-          ? definition.implementation
-          : path.join(GTAG_DIR, gtag.name, definition.implementation);
+        let scriptPath;
+        if (path.isAbsolute(implPath)) {
+          scriptPath = implPath;
+        } else {
+          // binディレクトリ内にあるか確認
+          const binPath = path.join(GTAG_DIR, gtag.name, 'bin', implPath);
+          const directPath = path.join(GTAG_DIR, gtag.name, implPath);
           
+          if (fs.existsSync(binPath)) {
+            scriptPath = binPath;
+          } else if (fs.existsSync(directPath)) {
+            scriptPath = directPath;
+          } else {
+            throw new Error(`${gtag.name}: 実装ファイル「${implPath}」が見つかりません。パス「${binPath}」と「${directPath}」を確認しました。`);
+          }
+        }
+        
+        console.log(`${gtag.name}: スクリプト実行パス: ${scriptPath}`);
+        
         gtagData = await executeCustomImplementation(
-          implementationPath,
+          scriptPath,
           definition.function || 'process',
           definition.params || {},
           inputTagsData
@@ -646,7 +731,7 @@ async function getGtagData(gtag, options = {}) {
         break;
         
       default:
-        throw new Error(`未対応のgtag種類: ${definition.type}`);
+        throw new Error(`未対応のgtag種類: ${definition.type} (${gtag.name})`);
     }
     
     return gtagData;
