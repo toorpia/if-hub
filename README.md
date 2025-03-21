@@ -95,7 +95,7 @@ IndustryFlow Hubは現在、主に`static_equipment_data`フォルダに設置�
 - Node.js 18以上
 - npm または yarn
 - （オプション）Docker & Docker Compose
-- Python 3.x（外部プロセッサ使用時）
+- Python 3.x（カスタムgtag実装に使用する場合）
 
 ### インストール
 
@@ -107,8 +107,8 @@ cd if-hub
 # 依存関係のインストール
 npm install
 
-# Python依存関係のインストール（外部プロセッサ使用する場合）
-pip install -r processors/requirements.txt
+# Python依存関係のインストール（カスタムgtag実装に使用する場合）
+# 必要なPythonパッケージは各自のgtagの要件に応じてインストール
 ```
 
 ### 使用方法
@@ -196,7 +196,7 @@ IF-HUBは以下のディレクトリ構造で構成されています：
 │   │   ├── data.js          # データアクセスAPI
 │   │   ├── equipment.js     # 設備情報API
 │   │   ├── index.js         # ルート集約
-│   │   ├── process.js       # 処理実行API
+│   │   ├── gtags.js         # gtag管理・処理API
 │   │   ├── system.js        # システム情報API
 │   │   └── tags.js          # タグ管理API
 │   ├── services/            # ビジネスロジック
@@ -204,14 +204,12 @@ IF-HUBは以下のディレクトリ構造で構成されています：
 │   └── utils/               # ユーティリティ関数
 │       ├── csv-importer.js  # CSVデータインポート
 │       ├── data-generator.js # テストデータ生成
-│       ├── external-processor.js # 外部プロセッサ連携
 │       ├── file-watcher.js  # ファイル変更監視
 │       ├── gtag-utils.js    # 仮想タグユーティリティ
 │       ├── tag-metadata-importer.js # タグメタデータインポート
 │       ├── tag-utils.js     # タグユーティリティ
 │       └── time-utils.js    # 時間関連ユーティリティ
 │
-├── processors/              # データ処理モジュール（移動平均、Zスコア計算など）
 ├── gtags/                   # 仮想タグ定義と計算スクリプト
 ├── docker/                  # Docker関連設定ファイル
 ├── docs/                    # プロジェクトドキュメント（API、開発者ガイド、運用マニュアル）
@@ -224,7 +222,7 @@ IF-HUBは以下のディレクトリ構造で構成されています：
 ### 主要ディレクトリの役割
 
 #### src/
-Node.jsベースのバックエンドアプリケーションコードが格納されています。Express.jsフレームワークを使用したRESTful APIの実装、データベース接続、外部プロセッサとの連携機能などが含まれます。
+Node.jsベースのバックエンドアプリケーションコードが格納されています。Express.jsフレームワークを使用したRESTful APIの実装、データベース接続、gtag管理などの機能が含まれます。
 
 #### gtags/
 仮想タグ（Generated Tags）の定義と計算ロジックが格納されています。階層型ディレクトリ構造を採用し、各gtagは独自のディレクトリを持ちます：
