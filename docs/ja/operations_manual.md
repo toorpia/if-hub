@@ -7,7 +7,7 @@
 3. [サービスの構築と起動](#サービスの構築と起動)
 4. [データ管理](#データ管理)
 5. [タグ表示名の管理](#タグ表示名の管理)
-6. [外部プロセッサの管理](#外部プロセッサの管理)
+6. [計算生成タグ（gtag）の管理](#計算生成タグgtagの管理)
 7. [メンテナンス](#メンテナンス)
 
 ## システム概要
@@ -19,7 +19,7 @@ IndustryFlow Hub（IF-HUB）は、製造設備の時系列データを安全に�
 - **時系列データの管理**: 工場設備の様々なセンサーから収集された時系列データを一元管理
 - **統一API**: RESTful APIによるシンプルなデータアクセス
 - **多言語対応**: タグIDに対する多言語表示名マッピング機能
-- **データ処理**: 移動平均などの統計処理機能（外部プロセッサによる拡張可能）
+- **データ処理**: 移動平均、Z-score、カスタム計算など様々な計算処理を統一的に提供
 - **Docker対応**: コンテナ環境での簡単なデプロイと運用
 
 ### システムアーキテクチャ
@@ -30,7 +30,7 @@ IF-HUBは以下のコンポーネントで構成されています：
 - SQLiteデータベース
 - CSVデータインポーター
 - タグ表示名マッピング
-- 外部プロセッサフレームワーク
+- 計算生成タグ（gtag）フレームワーク
 
 ## 環境構築
 
@@ -39,7 +39,7 @@ IF-HUBは以下のコンポーネントで構成されています：
 - Node.js 18以上
 - npm または yarn
 - （オプション）Docker & Docker Compose
-- Python 3.x（外部プロセッサ使用時）
+- Python 3.x（カスタムgtagの実装に使用する場合）
 
 ### リポジトリのクローン
 
@@ -54,8 +54,8 @@ cd if-hub
 # Node.js依存関係のインストール
 npm install
 
-# Python依存関係のインストール（外部プロセッサを使用する場合）
-pip install -r processors/requirements.txt
+# Python依存関係のインストール（カスタムgtag実装が必要な場合のみ）
+pip install pandas numpy scipy
 ```
 
 ## サービスの構築と起動
@@ -259,87 +259,155 @@ IF-HUBは、サーバー実行中にtranslationsファイルが変更された�
 
 これにより、サーバーを再起動せずにタグ表示名を更新できます。
 
-## 外部プロセッサの管理
+## 計算生成タグ（gtag）の管理
 
-### processorディレクトリ構造
+計算生成タグ（gtag）は、複数のタグを組み合わせた計算や、単一タグの統計処理などを行う仮想タグです。実データと同様に扱える計算値を定義でき、APIやCSVエクスポートにも統合されています。
+
+### gtagの種類
+
+IF-HUBは以下のタイプのgtagをサポートしています：
+
+1. **計算タイプ（calculation）**：数式を使用して複数タグの値を計算
+2. **移動平均タイプ（moving_average）**：単一タグの移動平均を計算
+3. **Z-scoreタイプ（zscore）**：標準化スコアを計算（異常検知などに有用）
+4. **偏差タイプ（deviation）**：偏差値を計算
+5. **カスタムタイプ（custom）**：カスタム実装を使用した複雑な計算
+6. **生データタイプ（raw）**：元データをそのまま返す
+
+### gtagディレクトリ構造
+
+gtagは以下のディレクトリ構造で管理されます：
 
 ```
-processors/
-├── requirements.txt        # Python依存関係
-├── run_processor.sh        # プロセッサ実行スクリプト
-└── moving_average/         # 移動平均プロセッサ
-    └── moving_average.py   # Python実装
+gtags/
+  ├── {gtag名}/             # 各gtagの独立したディレクトリ
+  │   ├── def.json          # gtag定義ファイル
+  │   └── bin/              # カスタム実装用（必要な場合のみ）
+  │       └── custom_impl.py  # カスタム計算実装
+  ├── {別のgtag名}/
+  │   └── def.json
+  ...
 ```
 
-### 新しいプロセッサの追加方法
+この構造により、各gtagは自己完結した単位として管理され、必要に応じてカスタム実装も含めることができます。
 
-1. `processors/`ディレクトリに新しいプロセッサディレクトリを作成します
-2. プロセッサディレクトリ内に実装ファイルを作成します
-   - Pythonの場合: `{プロセッサ名}.py`
-   - コンパイル言語の場合: `{プロセッサ名}`（実行可能バイナリ）
-3. `src/utils/external-processor.js`に新しいメソッドを追加します
-4. `src/server.js`にAPIエンドポイントを追加します
+### gtag定義ファイル（def.json）の例
 
-### Python実装例（移動平均）
+#### 計算タイプ
 
-```python
-#!/usr/bin/env python3
-import argparse
-import json
-import sys
-import pandas as pd
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='時系列データの移動平均を計算')
-    parser.add_argument('--input', type=str, required=True, help='入力JSONファイルパス')
-    parser.add_argument('--output', type=str, required=True, help='出力JSONファイルパス')
-    parser.add_argument('--window', type=int, default=5, help='移動平均の窓サイズ')
-    return parser.parse_args()
-
-def main():
-    args = parse_arguments()
-    
-    try:
-        # 入力ファイルを読み込む
-        with open(args.input, 'r') as f:
-            input_data = json.load(f)
-        
-        # データをDataFrameに変換
-        df = pd.DataFrame(input_data.get('data', []))
-        
-        # 移動平均を計算
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp')
-        df['ma_value'] = df['value'].rolling(window=args.window, min_periods=1).mean().round(2)
-        
-        # 結果を出力
-        result = []
-        for _, row in df.iterrows():
-            result.append({
-                'timestamp': row['timestamp'].isoformat(),
-                'value': float(row['ma_value']),
-                'original': float(row['value'])
-            })
-        
-        with open(args.output, 'w') as f:
-            json.dump(result, f, indent=2)
-        
-        print(f"処理完了: {len(result)}ポイントの移動平均を計算しました")
-        sys.exit(0)
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+```json
+{
+  "name": "Pump01.Efficiency",
+  "type": "calculation",
+  "inputs": ["Pump01.Flow", "Pump01.Power"],
+  "expression": "(inputs[0] / inputs[1])",
+  "description": "ポンプ効率（流量/消費電力）",
+  "unit": ""
+}
 ```
 
-### C/Go実装の考慮事項
+#### 移動平均タイプ
 
-- 実行可能バイナリを`processors/{プロセッサ名}/{プロセッサ名}`として配置します
-- 入出力は標準的なJSONフォーマットで行い、Python実装と互換性を持たせます
-- コマンドライン引数を同様の形式で受け取るようにします
-- 実行権限が付与されていることを確認します
+```json
+{
+  "name": "Pump01.TempMA",
+  "type": "moving_average",
+  "inputs": ["Pump01.Temperature"],
+  "window": 5,
+  "description": "ポンプ01温度の移動平均",
+  "unit": "°C"
+}
+```
+
+#### Z-scoreタイプ
+
+```json
+{
+  "name": "Tank01.LevelZscore",
+  "type": "zscore",
+  "inputs": ["Tank01.Level"],
+  "window": 24,
+  "description": "タンク01水位のZ-score（異常検知用）",
+  "unit": ""
+}
+```
+
+#### カスタムタイプ
+
+```json
+{
+  "name": "Tank01.PredictedLevel",
+  "type": "custom",
+  "inputs": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "implementation": "bin/predict_level.py",
+  "function": "predict_future_level",
+  "params": {
+    "prediction_minutes": 30
+  },
+  "description": "タンク01の30分後の水位予測",
+  "unit": "m"
+}
+```
+
+### 新しいgtagの追加方法
+
+1. `gtags/`ディレクトリ内に新しいgtag名のディレクトリを作成
+   ```bash
+   mkdir -p gtags/Pump01.NewMetric
+   ```
+
+2. 定義ファイル（def.json）を作成
+   ```bash
+   vim gtags/Pump01.NewMetric/def.json
+   ```
+
+3. 必要に応じてカスタム実装を追加
+   ```bash
+   mkdir -p gtags/Pump01.NewMetric/bin
+   vim gtags/Pump01.NewMetric/bin/custom_calc.py
+   chmod +x gtags/Pump01.NewMetric/bin/custom_calc.py
+   ```
+
+4. サーバーを再起動するか、しばらく待つと自動検出されます
+
+### 柔軟なタグ参照
+
+gtag定義の`inputs`フィールドでは、以下の様々な形式でタグを参照できます：
+
+1. **タグ名（tags.name）**: `"Pump01.Temperature"`
+2. **ソースタグ（source_tag）**: `"Temperature"`
+3. **設備＋ソースタグ**: `"Pump01:Temperature"`
+4. **タグID（整数）**: `1`
+
+この柔軟性により、さまざまな方法でタグを参照でき、メンテナンス性が向上します。
+
+### gtagの自動検出と同期
+
+サーバー起動時にすべてのgtag定義が読み込まれます。また、サーバー実行中にgtag定義が追加・変更された場合、自動的に検出され反映されます。これにより、サーバーを再起動せずに新しいgtagを追加したり、既存のgtagを変更したりできます。
+
+### APIからのgtag利用
+
+gtagは統合APIを通じて簡単にアクセスできます：
+
+1. **gtag固有データ取得**:
+   ```
+   GET /api/gtags/:name
+   ```
+
+2. **動的プロセス実行**（一時的な計算処理）:
+   ```
+   GET /api/process/:target?type=moving_average&window=10
+   ```
+
+3. **バッチデータ取得**（通常タグとgtagを混在可）:
+   ```
+   GET /api/batch?tags=Pump01.Temperature,Pump01.TempMA,Pump01.Efficiency
+   ```
+
+4. **CSVエクスポート**（設備に関連する全てのgtagを含む）:
+   ```
+   GET /api/export/equipment/:equipmentId/csv
+   ```
 
 ## メンテナンス
 
@@ -367,7 +435,7 @@ sqlite3 db/if_hub.db < backup_20230101.sql
 
 - `static_equipment_data/`ディレクトリのCSVファイル
 - `tag_metadata/`ディレクトリのタグメタデータファイル
-- `processors/`ディレクトリのカスタムプロセッサ
+- `gtags/`ディレクトリのgtag定義
 
 ### トラブルシューティング
 
@@ -414,20 +482,21 @@ sqlite3 db/if_hub.db < backup_20230101.sql
 
 3. `tag_metadata`ディレクトリのtranslationsファイルで、source_tag列が正しく定義されているか確認
 
-#### 外部プロセッサが動作しない場合
+#### gtag関連の問題
 
-1. 実行権限が付与されているか確認
+1. gtag定義が正しいか確認
    ```bash
-   chmod +x processors/run_processor.sh
-   chmod +x processors/moving_average/moving_average.py
+   cat gtags/Pump01.TempMA/def.json
    ```
 
-2. 依存ライブラリがインストールされているか確認
+2. gtag一覧を確認
    ```bash
-   pip install -r processors/requirements.txt
+   curl http://localhost:3001/api/tags?includeGtags=true
    ```
 
-3. 手動で外部プロセッサを実行してテスト
+3. 特定のgtagをテスト
    ```bash
-   cd processors
-   ./run_processor.sh moving_average --input test_input.json --output test_output.json --window 5
+   curl http://localhost:3001/api/gtags/Pump01.TempMA
+   ```
+
+4. APIレスポンスのエラーメッセージを確認

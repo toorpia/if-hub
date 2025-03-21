@@ -68,3 +68,5 @@ ehthumbs.db
 Thumbs.db
 tag_metadata/*.csv
 !tag_metadata/.gitkeep
+plan.md
+cm.txt

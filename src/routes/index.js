@@ -8,13 +8,13 @@ const systemRoutes = require('./system');
 const tagsRoutes = require('./tags');
 const equipmentRoutes = require('./equipment');
 const dataRoutes = require('./data');
-const processRoutes = require('./process');
+const gtagsRoutes = require('./gtags');
 
 // 各ルーターを登録
 router.use(systemRoutes);
 router.use(tagsRoutes);
 router.use(equipmentRoutes);
 router.use(dataRoutes);
-router.use(processRoutes);
+router.use(gtagsRoutes);
 
 module.exports = router;

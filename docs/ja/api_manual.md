@@ -18,20 +18,21 @@
     - [特定タグのデータ取得](#特定タグのデータ取得)
     - [複数タグのバッチ取得](#複数タグのバッチ取得)
     - [最新値の取得](#最新値の取得)
-  - [データ処理 API](#データ処理-api)
-    - [移動平均の計算](#移動平均の計算)
-    - [Z-scoreの計算](#z-scoreの計算)
-    - [偏差の計算](#偏差の計算)
+  - [gtag API](#gtag-api)
+    - [gtagデータの取得](#gtagデータの取得)
+    - [動的プロセス実行](#動的プロセス実行)
   - [データエクスポート API](#データエクスポート-api)
     - [設備のCSVデータエクスポート](#設備のcsvデータエクスポート)
   - [計算生成タグ（gtag）システム](#計算生成タグgtagシステム)
     - [概要](#概要)
     - [gtag定義の構造](#gtag定義の構造)
       - [計算タイプの例：](#計算タイプの例)
-      - [Pythonスクリプトタイプの例：](#pythonスクリプトタイプの例)
+      - [移動平均タイプの例：](#移動平均タイプの例)
+      - [Z-scoreタイプの例：](#z-scoreタイプの例)
+      - [カスタムタイプの例：](#カスタムタイプの例)
     - [gtagの使用方法](#gtagの使用方法)
-      - [gtag一覧の取得](#gtag一覧の取得)
-      - [gtagデータの取得](#gtagデータの取得)
+      - [新しいgtagの追加方法](#新しいgtagの追加方法)
+      - [柔軟なタグ参照](#柔軟なタグ参照)
       - [タグ一覧と設備一覧でのgtag表示](#タグ一覧と設備一覧でのgtag表示)
     - [gtagの同期と更新](#gtagの同期と更新)
   - [レスポンス形式](#レスポンス形式)
@@ -486,66 +487,60 @@ GET /api/current?tags=Pump01.Temperature,Pump01.Pressure&display=true
 }
 ```
 
-## データ処理 API
+## gtag API
 
-### 移動平均の計算
+### gtagデータの取得
 
 ```
-GET /api/process/ma/:tagId
+GET /api/gtags/:name
 ```
 
-指定したタグの移動平均を計算します。
+特定のgtag（生成タグ）のデータを計算し取得します。このエンドポイントは移動平均、Z-score、カスタム計算など、様々なタイプのgtagに対応しています。
 
 **パスパラメータ:**
 
 | パラメータ | 型 | 説明 |
 |----------|------|-------------|
-| `tagId` | String | 処理するタグのID |
+| `name` | String | 取得するgtagの名前 (例: "Pump01.TempMA") |
 
 **クエリパラメータ:**
 
 | パラメータ | 型 | 説明 | デフォルト |
 |----------|------|-------------|---------|
-| `window` | Number | 移動平均の窓サイズ（ポイント数） | 5 |
 | `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
 | `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+| `params` | JSON文字列 | 追加パラメータ（JSON形式） | {} |
 
 **リクエスト例:**
 
 ```
-GET /api/process/ma/Pump01.Temperature?window=10&display=true
+GET /api/gtags/Pump01.TempMA?timeshift=true&display=true
 ```
 
 **レスポンス例:**
 
 ```json
 {
-  "tagId": "Pump01.Temperature",
+  "name": "Pump01.TempMA",
+  "type": "moving_average",
   "metadata": {
-    "id": "Pump01.Temperature",
-    "equipment": "Pump01",
-    "name": "Temperature",
-    "source_tag": "Temperature",
+    "description": "ポンプ01温度の移動平均",
     "unit": "°C",
-    "min": 50.2,
-    "max": 79.8,
-    "display_name": "ポンプ01.温度"
+    "equipment": "Pump01"
   },
-  "processType": "moving_average",
-  "windowSize": 10,
   "data": [
     {
-      "timestamp": "2023-01-01T00:00:00.000Z",
-      "value": 75.2,
+      "timestamp": "2023-03-01T12:00:00.000Z",
+      "value": 75.4,
       "original": 75.2
     },
     {
-      "timestamp": "2023-01-01T00:10:00.000Z",
-      "value": 75.65,
+      "timestamp": "2023-03-01T12:10:00.000Z",
+      "value": 75.8,
       "original": 76.1
     },
     ...
@@ -553,25 +548,26 @@ GET /api/process/ma/Pump01.Temperature?window=10&display=true
 }
 ```
 
-### Z-scoreの計算
+### 動的プロセス実行
 
 ```
-GET /api/process/zscore/:tagId
+GET /api/process/:target
 ```
 
-指定したタグのZ-score（標準化スコア）を計算します。Z-scoreは、データポイントが平均からどれだけ標準偏差離れているかを示す値です。
+既存のタグに対して動的に様々な処理を実行します。指定されたタグに対して一時的に処理を適用し、結果を取得します。
 
 **パスパラメータ:**
 
 | パラメータ | 型 | 説明 |
 |----------|------|-------------|
-| `tagId` | String | 処理するタグのID |
+| `target` | String | 処理対象のタグ名/ID (例: "Pump01.Temperature") |
 
 **クエリパラメータ:**
 
 | パラメータ | 型 | 説明 | デフォルト |
 |----------|------|-------------|---------|
-| `window` | Number | 移動ウィンドウのサイズ（ポイント数）、指定なしの場合は全期間で計算 | null |
+| `type` | String | 処理タイプ ("raw", "moving_average", "zscore", "deviation") | "raw" |
+| `window` | Number | 窓サイズ（移動平均、Z-score、偏差の場合） | タイプに依存 |
 | `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
 | `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
@@ -582,14 +578,15 @@ GET /api/process/zscore/:tagId
 **リクエスト例:**
 
 ```
-GET /api/process/zscore/Pump01.Temperature?window=10&display=true
+GET /api/process/Pump01.Temperature?type=moving_average&window=10&timeshift=true
 ```
 
 **レスポンス例:**
 
 ```json
 {
-  "tagId": "Pump01.Temperature",
+  "target": "Pump01.Temperature",
+  "type": "moving_average",
   "metadata": {
     "id": "Pump01.Temperature",
     "equipment": "Pump01",
@@ -597,92 +594,18 @@ GET /api/process/zscore/Pump01.Temperature?window=10&display=true
     "source_tag": "Temperature",
     "unit": "°C",
     "min": 50.2,
-    "max": 79.8,
-    "display_name": "ポンプ01.温度"
+    "max": 79.8
   },
-  "processType": "zscore",
-  "windowSize": 10,
   "data": [
     {
-      "timestamp": "2023-01-01T00:00:00.000Z",
-      "value": 0.2,
-      "original": 75.2,
-      "mean": 74.5,
-      "std": 3.5
+      "timestamp": "2023-03-01T12:00:00.000Z",
+      "value": 75.4,
+      "original": 75.2
     },
     {
-      "timestamp": "2023-01-01T00:10:00.000Z",
-      "value": 0.8,
-      "original": 76.1,
-      "mean": 74.8,
-      "std": 3.6
-    },
-    ...
-  ]
-}
-```
-
-### 偏差の計算
-
-```
-GET /api/process/deviation/:tagId
-```
-
-指定したタグの偏差（平均からの差）を計算します。
-
-**パスパラメータ:**
-
-| パラメータ | 型 | 説明 |
-|----------|------|-------------|
-| `tagId` | String | 処理するタグのID |
-
-**クエリパラメータ:**
-
-| パラメータ | 型 | 説明 | デフォルト |
-|----------|------|-------------|---------|
-| `window` | Number | 移動ウィンドウのサイズ（ポイント数）、指定なしの場合は全期間で計算 | null |
-| `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
-| `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
-| `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
-| `display` | Boolean | タグの表示名を含めるか | false |
-| `lang` | String | 表示名の言語コード | "ja" |
-| `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
-
-**リクエスト例:**
-
-```
-GET /api/process/deviation/Pump01.Temperature?window=10&display=true
-```
-
-**レスポンス例:**
-
-```json
-{
-  "tagId": "Pump01.Temperature",
-  "metadata": {
-    "id": "Pump01.Temperature",
-    "equipment": "Pump01",
-    "name": "Temperature",
-    "source_tag": "Temperature",
-    "unit": "°C",
-    "min": 50.2,
-    "max": 79.8,
-    "display_name": "ポンプ01.温度"
-  },
-  "processType": "deviation",
-  "windowSize": 10,
-  "data": [
-    {
-      "timestamp": "2023-01-01T00:00:00.000Z",
-      "value": 0.7,
-      "original": 75.2,
-      "mean": 74.5
-    },
-    {
-      "timestamp": "2023-01-01T00:10:00.000Z",
-      "value": 1.3,
-      "original": 76.1,
-      "mean": 74.8
+      "timestamp": "2023-03-01T12:10:00.000Z",
+      "value": 75.8,
+      "original": 76.1
     },
     ...
   ]
@@ -766,102 +689,119 @@ datetime,ポンプ01.流量 (L/min),ポンプ01.圧力 (kPa),ポンプ01.温度 
 
 ### 概要
 
-gtagには主に2つのタイプがあります：
+gtagには以下のタイプがあります：
 
-1. **計算タイプ（calculation）**：数式を使用して値を計算します
-2. **Pythonスクリプトタイプ（python）**：より複雑な計算にPythonスクリプトを使用します
+1. **計算タイプ（calculation）**：数式を使用して複数タグの値を計算
+2. **移動平均タイプ（moving_average）**：単一タグの移動平均を計算
+3. **Z-scoreタイプ（zscore）**：標準化スコアを計算（異常検知などに有用）
+4. **偏差タイプ（deviation）**：偏差値を計算
+5. **カスタムタイプ（custom）**：カスタム実装を使用した複雑な計算
+6. **生データタイプ（raw）**：元データをそのまま返す
 
 ### gtag定義の構造
+
+IF-HUBの最新バージョンでは、各gtagは独立したディレクトリで管理され、以下のようなディレクトリ構造となります：
+
+```
+gtags/
+  ├── {gtag名}/             # 各gtagの独立したディレクトリ
+  │   ├── def.json          # gtag定義ファイル
+  │   └── bin/              # カスタム実装用（必要な場合のみ）
+  │       └── custom_impl.py  # カスタム計算実装
+  ├── {別のgtag名}/
+  │   └── def.json
+  ...
+```
 
 #### 計算タイプの例：
 
 ```json
 {
-  "id": "Pump01.EfficiencyIndex",
-  "name": "EfficiencyIndex",
-  "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
-  "equipment": "Pump01",
-  "unit": "%",
+  "name": "Pump01.Efficiency",
   "type": "calculation",
-  "expression": "(Pump01.Flow / Pump01.PowerConsumption) * 100",
-  "sourceTags": ["Pump01.Flow", "Pump01.PowerConsumption"],
-  "options": {
-    "fillMissingData": "interpolate"
-  }
+  "inputs": ["Pump01.Flow", "Pump01.Power"],
+  "expression": "(inputs[0] / inputs[1])",
+  "description": "ポンプ効率（流量/消費電力）",
+  "unit": "%"
 }
 ```
 
-#### Pythonスクリプトタイプの例：
+#### 移動平均タイプの例：
 
 ```json
 {
-  "id": "Tank01.PredictedLevel",
-  "name": "PredictedLevel",
-  "description": "タンク01の30分後の水位予測",
-  "equipment": "Tank01",
-  "unit": "m",
-  "type": "python",
-  "script": "predict_level.py",
+  "name": "Pump01.TempMA",
+  "type": "moving_average",
+  "inputs": ["Pump01.Temperature"],
+  "window": 5,
+  "description": "ポンプ01温度の移動平均",
+  "unit": "°C"
+}
+```
+
+#### Z-scoreタイプの例：
+
+```json
+{
+  "name": "Tank01.LevelZscore",
+  "type": "zscore",
+  "inputs": ["Tank01.Level"],
+  "window": 24,
+  "description": "タンク01水位のZ-score（異常検知用）",
+  "unit": ""
+}
+```
+
+#### カスタムタイプの例：
+
+```json
+{
+  "name": "Tank01.PredictedLevel",
+  "type": "custom",
+  "inputs": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "implementation": "bin/predict_level.py",
   "function": "predict_future_level",
-  "parameters": {
+  "params": {
     "prediction_minutes": 30
   },
-  "sourceTags": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
-  "options": {
-    "cacheTime": 300
-  }
+  "description": "タンク01の30分後の水位予測",
+  "unit": "m"
 }
 ```
 
 ### gtagの使用方法
 
-gtagは通常のタグと同様に扱うことができます。主なAPIエンドポイントは以下の通りです：
+#### 新しいgtagの追加方法
 
-#### gtag一覧の取得
+1. `gtags/`ディレクトリ内に新しいgtag名のディレクトリを作成
+   ```bash
+   mkdir -p gtags/Pump01.NewMetric
+   ```
 
-```
-GET /api/gtags
-```
+2. 定義ファイル（def.json）を作成
+   ```bash
+   vim gtags/Pump01.NewMetric/def.json
+   ```
 
-**レスポンス例:**
+3. 必要に応じてカスタム実装を追加
+   ```bash
+   mkdir -p gtags/Pump01.NewMetric/bin
+   vim gtags/Pump01.NewMetric/bin/custom_calc.py
+   chmod +x gtags/Pump01.NewMetric/bin/custom_calc.py
+   ```
 
-```json
-{
-  "gtags": [
-    {
-      "id": "Pump01.EfficiencyIndex",
-      "equipment": "Pump01",
-      "name": "EfficiencyIndex",
-      "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
-      "unit": "%",
-      "type": "calculation",
-      "sourceTags": ["Pump01.Flow", "Pump01.PowerConsumption"],
-      "createdAt": "2023-07-01T00:00:00.000Z",
-      "updatedAt": "2023-07-01T00:00:00.000Z"
-    },
-    {
-      "id": "Tank01.PredictedLevel",
-      "equipment": "Tank01",
-      "name": "PredictedLevel",
-      "description": "タンク01の30分後の水位予測",
-      "unit": "m",
-      "type": "python",
-      "sourceTags": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
-      "createdAt": "2023-07-01T00:00:00.000Z",
-      "updatedAt": "2023-07-01T00:00:00.000Z"
-    }
-  ]
-}
-```
+4. サーバーを再起動するか、しばらく待つと自動検出されます
 
-#### gtagデータの取得
+#### 柔軟なタグ参照
 
-gtagのデータは、通常のタグと同じAPIエンドポイントを使用して取得できます：
+gtag定義の`inputs`フィールドでは、以下の様々な形式でタグを参照できます：
 
-```
-GET /api/data/Pump01.EfficiencyIndex
-GET /api/batch?tags=Pump01.Flow,Pump01.EfficiencyIndex
-```
+1. **タグ名（tags.name）**: `"Pump01.Temperature"`
+2. **ソースタグ（source_tag）**: `"Temperature"`
+3. **設備＋ソースタグ**: `"Pump01:Temperature"`
+4. **タグID（整数）**: `1`
+
+この柔軟性により、さまざまな方法でタグを参照でき、メンテナンス性が向上します。
 
 #### タグ一覧と設備一覧でのgtag表示
 
@@ -874,9 +814,9 @@ GET /api/equipment?includeTags=true&includeGtags=false
 
 ### gtagの同期と更新
 
-- gtagはJSON形式の定義ファイルとして `gtags/definitions/` ディレクトリに保存されます
+- gtagは階層型ディレクトリ構造で管理され、各gtagは独自のディレクトリを持ちます
 - サーバー起動時に全てのgtag定義が読み込まれます
-- サーバー実行中にgtag定義ファイルが更新された場合、5分以内に自動的に変更が検出され反映されます
+- サーバー実行中にgtag定義が追加・変更された場合、自動的に検出され反映されます
 
 ## レスポンス形式
 
