@@ -21,6 +21,7 @@
   - [gtag API](#gtag-api)
     - [gtagデータの取得](#gtagデータの取得)
     - [動的プロセス実行](#動的プロセス実行)
+      - [1. 標準データ取得APIを使用（推奨方法）](#1-標準データ取得apiを使用推奨方法)
   - [データエクスポート API](#データエクスポート-api)
     - [設備のCSVデータエクスポート](#設備のcsvデータエクスポート)
   - [計算生成タグ（gtag）システム](#計算生成タグgtagシステム)
@@ -57,6 +58,8 @@
     - [Python クライアント実装例](#python-クライアント実装例)
     - [設備のCSVデータエクスポート](#設備のcsvデータエクスポート-1)
     - [curl を使った例](#curl-を使った例)
+- [プロセス専用API](#プロセス専用api)
+- [あるいは標準データ取得API（推奨）](#あるいは標準データ取得api推奨)
 
 ## API概要
 
@@ -562,67 +565,43 @@ GET /api/gtags/Pump01.TempMA?timeshift=true&display=true
 
 ### 動的プロセス実行
 
+既存のタグに対して動的に様々な処理を適用する方法は主に2つあります：
+
+#### 1. 標準データ取得APIを使用（推奨方法）
+
 ```
-GET /api/process/:target
+GET /api/data/:tagId?processing=moving_average
 ```
 
-既存のタグに対して動的に様々な処理を実行します。指定されたタグに対して一時的に処理を適用し、結果を取得します。
+タグデータ取得時に処理パラメータを指定することで、同時に処理を適用できます。これが標準的かつ推奨される方法です。
 
 **パスパラメータ:**
 
 | パラメータ | 型 | 説明 |
 |----------|------|-------------|
-| `target` | String | 処理対象のタグ名/ID (例: "Pump01.Temperature") |
+| `tagId` | String | 処理対象のタグ名/ID (例: "Pump01.Temperature") |
 
 **クエリパラメータ:**
 
 | パラメータ | 型 | 説明 | デフォルト |
 |----------|------|-------------|---------|
-| `type` | String | 処理タイプ ("raw", "moving_average", "zscore", "deviation") | "raw" |
-| `window` | Number | 窓サイズ（移動平均、Z-score、偏差の場合） | タイプに依存 |
 | `start` | String | 開始日時 (ISO 8601形式) | なし (全期間) |
 | `end` | String | 終了日時 (ISO 8601形式) | なし (全期間) |
 | `timeshift` | Boolean | 過去データを現在時刻にシフトするか | false |
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+| `processing` | String | 処理タイプ ("moving_average", "zscore", "deviation") | なし (処理なし) |
+| `window` | Number | 窓サイズ（移動平均、Z-score、偏差の場合） | タイプに依存 |
 
 **リクエスト例:**
 
 ```
-GET /api/process/Pump01.Temperature?type=moving_average&window=10&timeshift=true
+GET /api/data/Pump01.Temperature?processing=moving_average&window=10&timeshift=true
 ```
 
-**レスポンス例:**
+**注意**: この方法はバッチAPI (`/api/batch`) でも同様に適用できます。例：`/api/batch?tags=Tag1,Tag2&processing=zscore`
 
-```json
-{
-  "target": "Pump01.Temperature",
-  "type": "moving_average",
-  "metadata": {
-    "id": "Pump01.Temperature",
-    "equipment": "Pump01",
-    "name": "Temperature",
-    "source_tag": "Temperature",
-    "unit": "°C",
-    "min": 50.2,
-    "max": 79.8
-  },
-  "data": [
-    {
-      "timestamp": "2023-03-01T12:00:00.000Z",
-      "value": 75.4,
-      "original": 75.2
-    },
-    {
-      "timestamp": "2023-03-01T12:10:00.000Z",
-      "value": 75.8,
-      "original": 76.1
-    },
-    ...
-  ]
-}
-```
 
 ## データエクスポート API
 
@@ -833,7 +812,7 @@ GET /api/equipment?includeTags=true&includeGtags=false
 
 - gtagは階層型ディレクトリ構造で管理され、各gtagは独自のディレクトリを持ちます
 - サーバー起動時に全てのgtag定義が読み込まれます
-- サーバー実行中にgtag定義が追加・変更された場合、自動的に検出され反映されます
+- サーバー実行中にgtag定義が追加・変更された場合、最大1分以内に自動的に検出され反映されます（サーバー再起動不要）
 
 ## レスポンス形式
 
@@ -1291,4 +1270,8 @@ curl -o pump01_data.csv "http://localhost:3001/api/export/equipment/Pump01/csv?s
 
 移動平均の計算:
 ```bash
-curl http://localhost:3001/api/process/ma/Pump01.Temperature?window=10&timeshift=true
+# プロセス専用API
+curl http://localhost:3001/api/process/Pump01.Temperature?type=moving_average&window=10&timeshift=true
+
+# あるいは標準データ取得API（推奨）
+curl http://localhost:3001/api/data/Pump01.Temperature?processing=moving_average&window=10&timeshift=true
