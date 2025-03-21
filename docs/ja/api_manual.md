@@ -310,7 +310,7 @@ GET /api/equipment
 GET /api/data/:tagId
 ```
 
-指定したタグIDのデータを取得します。
+指定したタグIDのデータを取得します。また、処理オプションを指定することで、取得したデータに対して様々な計算処理を適用できます。
 
 **パスパラメータ:**
 
@@ -328,6 +328,16 @@ GET /api/data/:tagId
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+| `processing` | String | 処理タイプ (moving_average、zscore、deviation) | なし (処理なし) |
+| `window` | Number | 処理窓サイズ | 処理タイプに依存 |
+
+**処理オプション:**
+
+| 処理タイプ | 説明 | 窓サイズのデフォルト |
+|----------|------|-------------|
+| `moving_average` | 移動平均を計算 | 5 |
+| `zscore` | Z-score（標準化スコア）を計算 | null（全データ使用） |
+| `deviation` | 偏差値を計算 | null（全データ使用） |
 
 **レスポンス例:**
 
@@ -377,6 +387,8 @@ GET /api/batch
 | `display` | Boolean | タグの表示名を含めるか | false |
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
+| `processing` | String | 処理タイプ (moving_average、zscore、deviation) | なし (処理なし) |
+| `window` | Number | 処理窓サイズ | 処理タイプに依存 |
 
 **リクエスト例:**
 
@@ -642,6 +654,8 @@ GET /api/export/equipment/:equipmentId/csv
 | `skipInvalidValues` | Boolean | 不定値（Infinity、NaNなど）を空セルとして出力するかどうか | true |
 | `zeroAsNull` | Boolean | 値0をnull（空白）として出力するかどうか | false |
 | `zeroAsNullTags` | String | 特定のタグのみ値0をnull（空白）として出力するためのカンマ区切りタグリスト | なし |
+| `processing` | String | 処理タイプ (moving_average、zscore、deviation) | なし (処理なし) |
+| `window` | Number | 処理窓サイズ | 処理タイプに依存 |
 
 **レスポンスヘッダー:**
 
