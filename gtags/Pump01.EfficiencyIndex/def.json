@@ -4,8 +4,5 @@
   "inputs": ["Pump01.Flow", "Pump01.PowerConsumption"],
   "expression": "(inputs[0] / inputs[1]) * 100",
   "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
-  "unit": "%",
-  "options": {
-    "fillMissingData": "interpolate"
-  }
+  "unit": "%"
 }

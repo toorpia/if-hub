@@ -1,8 +1,9 @@
 {
   "name": "Tank01.LevelZscore",
-  "type": "zscore",
+  "type": "custom",
   "inputs": ["Tank01.Level"],
-  "window": 24,
+  "prog": "bin/zscore_processor.py",
+  "args": ["--window=24"],
   "description": "タンク01水位のZ-score（異常検知用）",
   "unit": ""
 }

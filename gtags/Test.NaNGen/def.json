@@ -4,6 +4,5 @@
   "inputs": ["Pump01.Flow"],
   "expression": "0/0",
   "description": "NaN生成テスト（不定値発生）",
-  "unit": "",
-  "equipment": "Test"
+  "unit": ""
 }

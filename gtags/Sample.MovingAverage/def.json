@@ -1,0 +1,9 @@
+{
+  "name": "Sample.MovingAverage",
+  "type": "custom",
+  "inputs": ["Tank01.Level"],
+  "prog": "bin/processor.py",
+  "args": ["--window=5"],
+  "description": "サンプル移動平均計算",
+  "unit": "m"
+}
