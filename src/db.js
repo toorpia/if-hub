@@ -24,9 +24,9 @@ function initDatabase() {
   // タグメタデータテーブル
   db.exec(`
     CREATE TABLE IF NOT EXISTS tags (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
       equipment TEXT NOT NULL,
-      name TEXT NOT NULL,
       source_tag TEXT NOT NULL,
       unit TEXT,
       min REAL,
@@ -37,7 +37,7 @@ function initDatabase() {
   // 時系列データテーブル
   db.exec(`
     CREATE TABLE IF NOT EXISTS tag_data (
-      tag_id TEXT NOT NULL,
+      tag_id INTEGER NOT NULL,
       timestamp TEXT NOT NULL,
       value REAL,
       PRIMARY KEY (tag_id, timestamp),
@@ -48,7 +48,7 @@ function initDatabase() {
   // タグ表示名テーブル
   db.exec(`
     CREATE TABLE IF NOT EXISTS tag_translations (
-      tag_id TEXT NOT NULL,
+      tag_id INTEGER NOT NULL,
       language TEXT NOT NULL,
       display_name TEXT NOT NULL,
       unit TEXT,
@@ -61,6 +61,7 @@ function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)`);
 
   console.log('データベーステーブルの初期化が完了しました');

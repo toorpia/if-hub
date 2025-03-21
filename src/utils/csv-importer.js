@@ -110,23 +110,46 @@ async function importCsvToDatabase() {
             const max = Math.max(...tagValues);
             
             // タグレコードの挿入または更新
-            const stmtTag = db.prepare(`
-              INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `);
+            // 既存のタグを確認
+            const existingTag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagId);
             
-            stmtTag.run(
-              tagId,
-              equipmentId,
-              header,
-              header,        // source_tagとして元のタグ名を保存
-              guessUnit(header),
-              min,
-              max
-            );
+            let tagIdInt; // 整数型タグID
+            
+            if (existingTag) {
+              // 既存のタグを更新
+              db.prepare(`
+                UPDATE tags SET equipment = ?, source_tag = ?, unit = ?, min = ?, max = ?
+                WHERE id = ?
+              `).run(
+                equipmentId,
+                header,
+                guessUnit(header),
+                min,
+                max,
+                existingTag.id
+              );
+              tagIdInt = existingTag.id;
+            } else {
+              // 新しいタグを挿入
+              const stmtTag = db.prepare(`
+                INSERT INTO tags (name, equipment, source_tag, unit, min, max)
+                VALUES (?, ?, ?, ?, ?, ?)
+              `);
+              
+              const result = stmtTag.run(
+                tagId,
+                equipmentId,
+                header,        // source_tagとして元のタグ名を保存
+                guessUnit(header),
+                min,
+                max
+              );
+              
+              tagIdInt = result.lastInsertRowid;
+            }
             
             // タグにメタデータを適用
-            applyMetadataToTag(tagId, header);
+            applyMetadataToTag(tagIdInt, header);
             
             totalTagCount++;
             
@@ -139,7 +162,7 @@ async function importCsvToDatabase() {
             // バッチ挿入用トランザクション
             const insertBatch = db.transaction((points) => {
               for (const point of points) {
-                stmtData.run(point.tagId, point.timestamp, point.value);
+                stmtData.run(tagIdInt, point.timestamp, point.value);
               }
             });
             
@@ -306,24 +329,46 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
     db.exec('BEGIN TRANSACTION');
     
     try {
-      // まずタグレコードを作成
-      const stmtTag = db.prepare(`
-        INSERT OR REPLACE INTO tags (id, equipment, name, source_tag, unit, min, max)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
+      // 既存のタグを確認
+      const existingTag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagId);
       
-      stmtTag.run(
-        tagId,
-        equipmentId,
-        header,
-        header,
-        guessUnit(header),
-        min === Infinity ? 0 : min,
-        max === -Infinity ? 0 : max
-      );
+      let tagIdInt; // 整数型タグID
+      
+      if (existingTag) {
+        // 既存のタグを更新
+        db.prepare(`
+          UPDATE tags SET equipment = ?, source_tag = ?, unit = ?, min = ?, max = ?
+          WHERE id = ?
+        `).run(
+          equipmentId,
+          header,
+          guessUnit(header),
+          min === Infinity ? 0 : min,
+          max === -Infinity ? 0 : max,
+          existingTag.id
+        );
+        tagIdInt = existingTag.id;
+      } else {
+        // 新しいタグを挿入
+        const stmtTag = db.prepare(`
+          INSERT INTO tags (name, equipment, source_tag, unit, min, max)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        
+        const result = stmtTag.run(
+          tagId,
+          equipmentId,
+          header,
+          guessUnit(header),
+          min === Infinity ? 0 : min,
+          max === -Infinity ? 0 : max
+        );
+        
+        tagIdInt = result.lastInsertRowid;
+      }
       
       // タグにメタデータを適用
-      applyMetadataToTag(tagId, header);
+      applyMetadataToTag(tagIdInt, header);
       
       // 次にデータポイントを挿入
       const stmtData = db.prepare(`
@@ -334,7 +379,7 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
       // データポイントをバッチで挿入
       const insertBatch = db.transaction((points) => {
         for (const point of points) {
-          stmtData.run(tagId, point.timestamp, point.value);
+          stmtData.run(tagIdInt, point.timestamp, point.value);
         }
       });
       
@@ -432,13 +477,12 @@ async function importSpecificCsvFile(fileInfo) {
       
       db.exec('BEGIN TRANSACTION');
       try {
-        // 設備に関連するタグIDを取得
-        const tagIds = db.prepare('SELECT id FROM tags WHERE equipment = ?').all(equipmentId)
-          .map(tag => tag.id);
+        // 設備に関連するタグIDを取得（この時点でidは整数型）
+        const tagIds = db.prepare('SELECT id FROM tags WHERE equipment = ?').all(equipmentId);
         
         // タグデータを削除
-        for (const tagId of tagIds) {
-          db.prepare('DELETE FROM tag_data WHERE tag_id = ?').run(tagId);
+        for (const tag of tagIds) {
+          db.prepare('DELETE FROM tag_data WHERE tag_id = ?').run(tag.id);
         }
         
         // タグを削除

@@ -20,7 +20,7 @@ function initMetadataCache() {
 
 /**
  * タグが登録されたときにメタデータを適用
- * @param {string} tagId タグID
+ * @param {number} tagId タグID（整数型）
  * @param {string} sourceTag ソースタグ
  * @param {string} language 言語コード
  * @returns {boolean} メタデータが適用されたかどうか
@@ -32,8 +32,9 @@ function applyMetadataToTag(tagId, sourceTag, language = 'ja') {
 
   try {
     const metadata = metadataCache[sourceTag][language];
-    console.log(`タグ ${tagId} にキャッシュされたメタデータを適用します: ${JSON.stringify(metadata)}`);
+    console.log(`タグID ${tagId} にキャッシュされたメタデータを適用します: ${JSON.stringify(metadata)}`);
     
+    // tag_idは整数型になっていることに注意
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO tag_translations (tag_id, language, display_name, unit)
       VALUES (?, ?, ?, ?)

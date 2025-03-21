@@ -54,8 +54,8 @@ router.get('/api/equipment', (req, res) => {
         
         // タグに表示名を含める場合
         if (shouldDisplay) {
-          const tagIds = tags.map(tag => tag.id);
-          const metadataMap = getTagsMetadata(tagIds, {
+          const tagNames = tags.map(tag => tag.name);
+          const metadataMap = getTagsMetadata(tagNames, {
             display: true,
             lang,
             showUnit: shouldShowUnit
@@ -73,8 +73,8 @@ router.get('/api/equipment', (req, res) => {
               // 通常タグの場合
               return {
                 ...tag,
-                display_name: metadataMap[tag.id]?.display_name || tag.name,
-                unit: metadataMap[tag.id]?.unit || tag.unit
+                display_name: metadataMap[tag.name]?.display_name || tag.name,
+                unit: metadataMap[tag.name]?.unit || tag.unit
               };
             }
           });

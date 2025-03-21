@@ -32,8 +32,8 @@ router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
     
     // 表示名を追加
     if (display === 'true') {
-      const tagIds = tags.map(tag => tag.id);
-      const metadataMap = getTagsMetadata(tagIds, {
+      const tagNames = tags.map(tag => tag.name);
+      const metadataMap = getTagsMetadata(tagNames, {
         display: true,
         lang,
         showUnit: showUnit === 'true'
@@ -41,8 +41,8 @@ router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
       
       const tagsWithDisplayNames = tags.map(tag => ({
         ...tag,
-        display_name: metadataMap[tag.id]?.display_name || tag.name,
-        unit: metadataMap[tag.id]?.unit || tag.unit
+        display_name: metadataMap[tag.name]?.display_name || tag.name,
+        unit: metadataMap[tag.name]?.unit || tag.unit
       }));
       
       return res.json({
@@ -132,8 +132,8 @@ router.get('/api/tags', (req, res) => {
     
     // 表示名処理
     if (shouldDisplay) {
-      const tagIds = tags.map(tag => tag.id);
-      const metadataMap = getTagsMetadata(tagIds, { 
+      const tagNames = tags.map(tag => tag.name);
+      const metadataMap = getTagsMetadata(tagNames, { 
         display: true, 
         lang, 
         showUnit: shouldShowUnit 
@@ -151,8 +151,8 @@ router.get('/api/tags', (req, res) => {
           // 通常タグの場合
           return {
             ...tag,
-            display_name: metadataMap[tag.id]?.display_name || tag.name,
-            unit: metadataMap[tag.id]?.unit || tag.unit
+            display_name: metadataMap[tag.name]?.display_name || tag.name,
+            unit: metadataMap[tag.name]?.unit || tag.unit
           };
         }
       });
