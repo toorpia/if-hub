@@ -66,4 +66,5 @@ temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
-tag_metadata/translations_ja.csv
+tag_metadata/*.csv
+!tag_metadata/.gitkeep
