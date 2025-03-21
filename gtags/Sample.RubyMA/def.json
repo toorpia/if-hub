@@ -1,0 +1,9 @@
+{
+  "name": "Sample.RubyMA",
+  "type": "custom",
+  "inputs": ["Tank01.Level"],
+  "prog": "bin/processor.rb",
+  "args": ["--window=5"],
+  "description": "Ruby言語で実装した移動平均計算",
+  "unit": "m"
+}
