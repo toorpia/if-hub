@@ -8,8 +8,8 @@ module.exports = {
   
   // サーバー設定
   server: {
-    port: process.env.PORT || 3500,
-    externalPort: process.env.EXTERNAL_PORT || 3501,  // 追加：外部ポート
+    port: process.env.PORT || 3000,
+    externalPort: process.env.EXTERNAL_PORT || 3001,  // 追加：外部ポート
     corsOrigins: process.env.ALLOWED_ORIGINS || '*'
   },
   
@@ -23,7 +23,7 @@ module.exports = {
     // 開発環境では静的データを使用、本番環境では実際のエンドポイントを使用
     apiUrl: process.env.NODE_ENV === 'production'
       ? process.env.EXTERNAL_API_URL
-      : 'http://localhost:3500/api',
+      : 'http://localhost:3000/api',
     
     // データソースモード設定
     mode: process.env.NODE_ENV === 'production'
