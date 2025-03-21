@@ -2,35 +2,45 @@
 const { db } = require('../db');
 
 /**
+ * タグ名から整数IDを取得
+ * @param {string} tagName - タグ名
+ * @returns {number|null} 整数ID（存在しない場合はnull）
+ */
+function getTagIdFromName(tagName) {
+  const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagName);
+  return tag ? tag.id : null;
+}
+
+/**
  * タグのメタデータを表示名付きで取得
- * @param {string} tagId - タグID
+ * @param {string} tagName - タグ名（APIでの参照に使用）
  * @param {Object} options - オプション
  * @param {boolean} options.display - 表示名を含めるかどうか
  * @param {string} options.lang - 言語コード
  * @param {boolean} options.showUnit - 単位を表示名と結合して表示するかどうか
  * @returns {Object} タグメタデータ
  */
-function getTagMetadata(tagId, options = {}) {
+function getTagMetadata(tagName, options = {}) {
   const { display = false, lang = 'ja', showUnit = false } = options;
   
-  // タグのメタデータを取得
-  const metadata = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId);
+  // タグ名から整数IDを取得してメタデータを取得
+  const metadata = db.prepare('SELECT * FROM tags WHERE name = ?').get(tagName);
   
   // タグが存在しないか、表示名が不要な場合はそのまま返す
   if (!metadata || !display) {
     return metadata;
   }
   
-  // 表示名と単位を取得
+  // 表示名と単位を取得（この時点でmetadata.idは整数型）
   const translation = db.prepare(
     'SELECT display_name, unit FROM tag_translations WHERE tag_id = ? AND language = ?'
-  ).get(tagId, lang);
+  ).get(metadata.id, lang);
   
   // 指定言語の表示名がない場合はデフォルト言語を試す
   if (!translation && lang !== 'default') {
     const defaultTranslation = db.prepare(
       'SELECT display_name, unit FROM tag_translations WHERE tag_id = ? AND language = ?'
-    ).get(tagId, 'default');
+    ).get(metadata.id, 'default');
     
     if (defaultTranslation) {
       // 単位を含めるかどうかで表示名を決定
@@ -101,20 +111,20 @@ function addSuffixToDuplicateDisplayNames(metadataMap) {
 
 /**
  * 複数タグのメタデータをバッチで取得
- * @param {string[]} tagIds - タグIDの配列
+ * @param {string[]} tagNames - タグ名の配列
  * @param {Object} options - オプション
  * @param {boolean} options.display - 表示名を含めるかどうか
  * @param {string} options.lang - 言語コード
  * @param {boolean} options.showUnit - 単位を表示名と結合して表示するかどうか
- * @returns {Object} タグIDをキーとするメタデータオブジェクト
+ * @returns {Object} タグ名をキーとするメタデータオブジェクト
  */
-function getTagsMetadata(tagIds, options = {}) {
+function getTagsMetadata(tagNames, options = {}) {
   const result = {};
   
-  for (const tagId of tagIds) {
-    const metadata = getTagMetadata(tagId, options);
+  for (const tagName of tagNames) {
+    const metadata = getTagMetadata(tagName, options);
     if (metadata) {
-      result[tagId] = metadata;
+      result[tagName] = metadata;
     }
   }
   
@@ -126,4 +136,4 @@ function getTagsMetadata(tagIds, options = {}) {
   return result;
 }
 
-module.exports = { getTagMetadata, getTagsMetadata };
+module.exports = { getTagIdFromName, getTagMetadata, getTagsMetadata };

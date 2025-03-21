@@ -71,7 +71,7 @@ async function importGtagDefinition(fileInfo) {
   try {
     const fileContent = await fs.readJson(fileInfo.path);
     
-    if (!fileContent.id || !fileContent.name || !fileContent.equipment || !fileContent.type) {
+    if (!fileContent.name || !fileContent.equipment || !fileContent.type) {
       throw new Error(`必須フィールドが不足しています: ${fileInfo.name}`);
     }
     
@@ -79,34 +79,32 @@ async function importGtagDefinition(fileInfo) {
     const now = new Date().toISOString();
     
     // gtagsテーブルに挿入または更新
-    const existingGtag = db.prepare('SELECT id FROM gtags WHERE id = ?').get(fileContent.id);
+    const existingGtag = db.prepare('SELECT id FROM gtags WHERE name = ?').get(fileContent.name);
     
     if (existingGtag) {
       // 更新
       db.prepare(`
         UPDATE gtags 
-        SET equipment = ?, name = ?, description = ?, unit = ?, type = ?, definition = ?, updated_at = ?
+        SET equipment = ?, description = ?, unit = ?, type = ?, definition = ?, updated_at = ?
         WHERE id = ?
       `).run(
         fileContent.equipment,
-        fileContent.name,
         fileContent.description || '',
         fileContent.unit || '',
         fileContent.type,
         JSON.stringify(fileContent),
         now,
-        fileContent.id
+        existingGtag.id
       );
-      console.log(`gtag「${fileContent.id}」を更新しました`);
+      console.log(`gtag「${fileContent.name}」を更新しました`);
     } else {
       // 新規作成
-      db.prepare(`
-        INSERT INTO gtags (id, equipment, name, description, unit, type, definition, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      const result = db.prepare(`
+        INSERT INTO gtags (name, equipment, description, unit, type, definition, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        fileContent.id,
-        fileContent.equipment,
         fileContent.name,
+        fileContent.equipment,
         fileContent.description || '',
         fileContent.unit || '',
         fileContent.type,
@@ -114,7 +112,7 @@ async function importGtagDefinition(fileInfo) {
         now,
         now
       );
-      console.log(`新しいgtag「${fileContent.id}」を登録しました`);
+      console.log(`新しいgtag「${fileContent.name}」を登録しました（ID: ${result.lastInsertRowid}）`);
     }
     
     return fileContent;
@@ -348,10 +346,18 @@ async function getGtagData(gtag, options = {}) {
     // ソースタグのデータを取得
     const sourceTagData = {};
     
-    for (const sourceTagId of definition.sourceTags) {
-      // タグデータを取得
+    for (const sourceTagName of definition.sourceTags) {
+      // テキスト形式のタグ名から整数IDを取得
+      const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(sourceTagName);
+      
+      if (!tag) {
+        console.warn(`ソースタグ「${sourceTagName}」が見つかりません。スキップします。`);
+        continue;
+      }
+      
+      // 整数IDを使用してタグデータを取得
       let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
-      const params = [sourceTagId];
+      const params = [tag.id]; // 整数型のtag_id
       
       if (start) {
         query += ' AND timestamp >= ?';
@@ -364,7 +370,7 @@ async function getGtagData(gtag, options = {}) {
       }
       
       query += ' ORDER BY timestamp';
-      sourceTagData[sourceTagId] = db.prepare(query).all(...params);
+      sourceTagData[sourceTagName] = db.prepare(query).all(...params);
     }
     
     // gtagの種類に応じて計算
@@ -385,7 +391,7 @@ async function getGtagData(gtag, options = {}) {
     
     return gtagData;
   } catch (error) {
-    console.error(`gtagデータの取得中にエラーが発生しました (${gtag.id}):`, error);
+    console.error(`gtagデータの取得中にエラーが発生しました (${gtag.name}):`, error);
     throw error;
   }
 }
@@ -398,9 +404,9 @@ function initializeGtagSystem() {
     // gtagsテーブルの作成
     db.prepare(`
       CREATE TABLE IF NOT EXISTS gtags (
-        id TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
         equipment TEXT NOT NULL,
-        name TEXT NOT NULL,
         description TEXT,
         unit TEXT,
         type TEXT NOT NULL,
@@ -413,6 +419,9 @@ function initializeGtagSystem() {
     // インデックス作成
     db.prepare(`
       CREATE INDEX IF NOT EXISTS idx_gtags_equipment ON gtags(equipment)
+    `).run();
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_gtags_name ON gtags(name)
     `).run();
     
     console.log('gtagシステムの初期化が完了しました');
