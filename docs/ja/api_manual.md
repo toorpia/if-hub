@@ -44,6 +44,13 @@
     - [表示名の重複処理](#表示名の重複処理)
   - [システム運用機能](#システム運用機能)
     - [タグメタデータファイルの動的更新](#タグメタデータファイルの動的更新)
+  - [システム内部アーキテクチャ](#システム内部アーキテクチャ)
+    - [データベース設計](#データベース設計)
+      - [tags テーブル](#tags-テーブル)
+      - [tag\_data テーブル](#tag_data-テーブル)
+      - [tag\_translations テーブル](#tag_translations-テーブル)
+      - [gtags テーブル](#gtags-テーブル)
+    - [タグID参照の仕組み](#タグid参照の仕組み)
   - [実装例](#実装例)
     - [Node.js クライアント実装例](#nodejs-クライアント実装例)
     - [Python クライアント実装例](#python-クライアント実装例)
@@ -962,6 +969,77 @@ IF-HUBは、サーバーの実行中にタグメタデータファイルが更�
 - 変更の検出はファイルのチェックサムに基づいて行われるため、実際に内容が変更された場合のみ再読み込みが実行されます
 
 この機能により、サーバーの再起動なしでタグの表示名を更新できます。新しい設備や測定点が追加された場合や、表示名の修正が必要になった場合に便利です。
+
+
+## システム内部アーキテクチャ
+
+### データベース設計
+
+IF-HUBは、効率的なデータ管理のために最適化されたデータベース設計を採用しています：
+
+#### tags テーブル
+```sql
+CREATE TABLE IF NOT EXISTS tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  equipment TEXT NOT NULL,
+  source_tag TEXT NOT NULL,
+  unit TEXT,
+  min REAL,
+  max REAL
+)
+```
+
+#### tag_data テーブル
+```sql
+CREATE TABLE IF NOT EXISTS tag_data (
+  tag_id INTEGER NOT NULL,
+  timestamp TEXT NOT NULL,
+  value REAL,
+  PRIMARY KEY (tag_id, timestamp),
+  FOREIGN KEY (tag_id) REFERENCES tags(id)
+)
+```
+
+#### tag_translations テーブル
+```sql
+CREATE TABLE IF NOT EXISTS tag_translations (
+  tag_id INTEGER NOT NULL,
+  language TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  unit TEXT,
+  PRIMARY KEY (tag_id, language),
+  FOREIGN KEY (tag_id) REFERENCES tags(id)
+)
+```
+
+#### gtags テーブル
+```sql
+CREATE TABLE IF NOT EXISTS gtags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  equipment TEXT NOT NULL,
+  description TEXT,
+  unit TEXT,
+  type TEXT NOT NULL,
+  definition TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+### タグID参照の仕組み
+
+IF-HUBでは、ユーザー向けのタグ名とシステム内部のIDを区別して効率的にデータを管理しています：
+
+1. **ユーザーインターフェース**: APIリクエストでは `Pump01.Temperature` のような読みやすいタグ名を使用
+2. **内部処理**: システム内部では整数型の自動採番IDを使用し、データベースでの検索と参照を最適化
+3. **変換プロセス**: 
+   ```
+   APIリクエスト (タグ名) → 内部ID検索 → データベースクエリ (整数ID) → データ取得 → レスポンス (タグ名)
+   ```
+
+この二重構造により、人間が理解しやすいインターフェースを維持しながら、データベースの効率性とパフォーマンスを最大化しています。これはとくに大量のデータポイントを持つシステムで重要な最適化です。
 
 ## 実装例
 

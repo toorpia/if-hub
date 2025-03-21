@@ -81,9 +81,9 @@ IF-HUBは、SQLiteデータベースを使用して時系列データとメタ�
 
 ```sql
 CREATE TABLE IF NOT EXISTS tags (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
   equipment TEXT NOT NULL,
-  name TEXT NOT NULL,
   source_tag TEXT NOT NULL,
   unit TEXT,
   min REAL,
@@ -93,9 +93,9 @@ CREATE TABLE IF NOT EXISTS tags (
 
 | カラム | 型 | 説明 |
 |-------|------|-----------|
-| id | TEXT | タグの一意識別子（例: `Pump01.Temperature`）|
+| id | INTEGER | タグの一意識別子（自動採番される整数）|
+| name | TEXT | タグの名前（例: `Pump01.Temperature`）|
 | equipment | TEXT | 設備名（例: `Pump01`）|
-| name | TEXT | タグ名（例: `Temperature`）|
 | source_tag | TEXT | 元のCSVカラム名（例: `Temperature`）|
 | unit | TEXT | 単位（例: `°C`）|
 | min | REAL | データの最小値 |
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS tags (
 
 ```sql
 CREATE TABLE IF NOT EXISTS tag_data (
-  tag_id TEXT NOT NULL,
+  tag_id INTEGER NOT NULL,
   timestamp TEXT NOT NULL,
   value REAL,
   PRIMARY KEY (tag_id, timestamp),
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS tag_data (
 
 | カラム | 型 | 説明 |
 |-------|------|-----------|
-| tag_id | TEXT | タグID（tags.idへの外部キー）|
+| tag_id | INTEGER | タグID（tags.idへの外部キー）|
 | timestamp | TEXT | 時刻（ISO 8601形式）|
 | value | REAL | データ値 |
 
@@ -125,9 +125,10 @@ CREATE TABLE IF NOT EXISTS tag_data (
 
 ```sql
 CREATE TABLE IF NOT EXISTS tag_translations (
-  tag_id TEXT NOT NULL,
+  tag_id INTEGER NOT NULL,
   language TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  unit TEXT,
   PRIMARY KEY (tag_id, language),
   FOREIGN KEY (tag_id) REFERENCES tags(id)
 )
@@ -135,9 +136,10 @@ CREATE TABLE IF NOT EXISTS tag_translations (
 
 | カラム | 型 | 説明 |
 |-------|------|-----------|
-| tag_id | TEXT | タグID（tags.idへの外部キー）|
+| tag_id | INTEGER | タグID（tags.idへの外部キー）|
 | language | TEXT | 言語コード（例: `ja`, `en`）|
 | display_name | TEXT | 表示名（例: `ポンプ01.温度`）|
+| unit | TEXT | 単位の表示名 |
 
 ### インデックス
 
