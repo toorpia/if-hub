@@ -1,13 +1,12 @@
 FROM node:18-alpine
 
-# Pythonと依存関係をインストール
-RUN apk add --no-cache python3 py3-pip \
-    && apk add --no-cache --virtual .build-deps \
-    gcc \
-    python3-dev \
-    musl-dev \
-    && pip3 install --no-cache-dir numpy pandas scikit-learn scipy matplotlib \
-    && apk del .build-deps
+# Pythonとデータ分析パッケージをインストール（apkパッケージを使用）
+RUN apk add --no-cache python3 \
+    py3-numpy \
+    py3-pandas \
+    py3-scipy \
+    py3-scikit-learn \
+    py3-matplotlib
 
 WORKDIR /app
 
