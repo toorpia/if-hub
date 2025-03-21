@@ -10,6 +10,8 @@ db/file_checksums.json
 
 # Generated data
 static_equipment_data/*.csv
+!static_equipment_data/Pump01.csv
+!static_equipment_data/Tank01.csv
 !static_equipment_data/.gitkeep
 
 # Logs
