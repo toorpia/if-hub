@@ -1,9 +1,8 @@
 {
   "name": "Pump01.TempMA",
-  "type": "custom",
+  "type": "moving_average",
   "inputs": ["Pump01.Temperature"],
-  "prog": "bin/ma_processor.py",
-  "args": ["--window=5"],
+  "window": 5,
   "description": "ポンプ01温度の移動平均",
   "unit": "°C"
 }
