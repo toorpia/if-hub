@@ -1,0 +1,9 @@
+{
+  "name": "Test.ValidCalc",
+  "type": "calculation",
+  "inputs": ["Pump01.Flow"],
+  "expression": "inputs[0] * 2",
+  "description": "有効な計算テスト（コントロール用）",
+  "unit": "",
+  "equipment": "Test"
+}

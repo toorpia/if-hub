@@ -1,0 +1,9 @@
+{
+  "name": "Test.ZeroDivision",
+  "type": "calculation",
+  "inputs": ["Pump01.Flow", "Pump01.Flow"],
+  "expression": "inputs[0] / (inputs[1] - inputs[1])",
+  "description": "ゼロ除算テスト（Infinity発生）",
+  "unit": "",
+  "equipment": "Test"
+}
