@@ -1,5 +1,14 @@
 FROM node:18-alpine
 
+# Pythonと依存関係をインストール
+RUN apk add --no-cache python3 py3-pip \
+    && apk add --no-cache --virtual .build-deps \
+    gcc \
+    python3-dev \
+    musl-dev \
+    && pip3 install --no-cache-dir numpy pandas scikit-learn scipy matplotlib \
+    && apk del .build-deps
+
 WORKDIR /app
 
 # アプリケーションの依存関係のためのpackage.jsonとpackage-lock.jsonをコピー
@@ -9,7 +18,7 @@ COPY package*.json ./
 RUN npm install
 
 # 必要なディレクトリを作成し、適切な権限を設定
-RUN mkdir -p /app/static_equipment_data /app/logs /app/db \
+RUN mkdir -p /app/static_equipment_data /app/logs /app/db /app/gtags \
     && chown -R node:node /app
 
 # ユーザー権限の設定を削除して、rootとして実行できるようにする
