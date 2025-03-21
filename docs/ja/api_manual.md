@@ -640,6 +640,8 @@ GET /api/export/equipment/:equipmentId/csv
 | `lang` | String | 表示名の言語コード | "ja" |
 | `showUnit` | Boolean | 表示名に単位を含めるかどうか | false |
 | `skipInvalidValues` | Boolean | 不定値（Infinity、NaNなど）を空セルとして出力するかどうか | true |
+| `zeroAsNull` | Boolean | 値0をnull（空白）として出力するかどうか | false |
+| `zeroAsNullTags` | String | 特定のタグのみ値0をnull（空白）として出力するためのカンマ区切りタグリスト | なし |
 
 **レスポンスヘッダー:**
 
