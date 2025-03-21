@@ -3,14 +3,25 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { getTagMetadata, getTagsMetadata } = require('../utils/tag-utils');
-const { getGtagData } = require('../utils/gtag-utils');
+const { getGtagData, executeProcess } = require('../utils/gtag-utils');
 const { getTimeShiftedData } = require('../utils/time-utils');
+const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('../utils/data-processing');
 const config = require('../config');
 
 // 特定タグのデータ取得
 router.get('/api/data/:tagName', async (req, res) => {
   const { tagName } = req.params;
-  const { start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
+  const { 
+    start, 
+    end, 
+    timeshift, 
+    display = 'false', 
+    lang = 'ja', 
+    showUnit = 'false', 
+    zeroAsNull = 'false',
+    processing,
+    window
+  } = req.query;
   
   try {
     // タグが通常タグかgtagかチェック
@@ -105,7 +116,64 @@ router.get('/api/data/:tagName', async (req, res) => {
     const tagData = db.prepare(query).all(...params);
     
     // タイムシフトを適用
-    const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+    let processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+    
+    // 処理オプションの適用
+    const processingInfo = {};
+    if (processing) {
+      const windowSize = window ? parseInt(window, 10) : null;
+      
+      const { executeProcess } = require('../utils/gtag-utils');
+      
+      try {
+        switch (processing) {
+          case 'moving_average':
+            processedData = await executeProcess(
+              tagName, 
+              'moving_average', 
+              { window: windowSize || 5 }, 
+              { start, end }
+            );
+            processingInfo.type = 'moving_average';
+            processingInfo.window = windowSize || 5;
+            break;
+            
+          case 'zscore':
+            processedData = await executeProcess(
+              tagName, 
+              'zscore', 
+              { window: windowSize }, 
+              { start, end }
+            );
+            processingInfo.type = 'zscore';
+            processingInfo.window = windowSize;
+            break;
+            
+          case 'deviation':
+            processedData = await executeProcess(
+              tagName, 
+              'deviation', 
+              { window: windowSize }, 
+              { start, end }
+            );
+            processingInfo.type = 'deviation';
+            processingInfo.window = windowSize;
+            break;
+            
+          default:
+            return res.status(400).json({ 
+              error: `Unsupported processing type: ${processing}`,
+              supportedTypes: ['moving_average', 'zscore', 'deviation']
+            });
+        }
+      } catch (error) {
+        console.error(`処理オプション適用中にエラーが発生しました: ${error.message}`);
+        return res.status(500).json({ 
+          error: 'Processing error',
+          message: error.message
+        });
+      }
+    }
     
     // 値0をnullとして扱うオプションの処理
     const shouldTreatZeroAsNull = zeroAsNull === 'true';
@@ -117,11 +185,21 @@ router.get('/api/data/:tagName', async (req, res) => {
       });
     }
     
-    res.json({
+    // レスポンスの作成
+    const response = {
       tagId: tagName, // APIの互換性のためにtagNameを返す
-      metadata,
-      data: processedData
-    });
+      metadata
+    };
+    
+    // 処理情報を追加（処理が適用された場合のみ）
+    if (processing && Object.keys(processingInfo).length > 0) {
+      response.processing = processingInfo;
+    }
+    
+    // データを追加
+    response.data = processedData;
+    
+    res.json(response);
   } catch (error) {
     console.error('タグデータの取得中にエラーが発生しました:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -130,7 +208,18 @@ router.get('/api/data/:tagName', async (req, res) => {
 
 // 複数タグの一括取得
 router.get('/api/batch', async (req, res) => {
-  const { tags, start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
+  const { 
+    tags, 
+    start, 
+    end, 
+    timeshift, 
+    display = 'false', 
+    lang = 'ja', 
+    showUnit = 'false', 
+    zeroAsNull = 'false',
+    processing,
+    window
+  } = req.query;
   
   if (!tags) {
     return res.status(400).json({ error: 'Tags parameter is required' });
@@ -198,7 +287,55 @@ router.get('/api/batch', async (req, res) => {
       const tagData = db.prepare(query).all(...params);
       
       // タイムシフトを適用
-      const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+      let processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
+      
+      // 処理オプションの適用
+      const processingInfo = {};
+      if (processing) {
+        const windowSize = window ? parseInt(window, 10) : null;
+        
+        const { executeProcess } = require('../utils/gtag-utils');
+        
+        try {
+          switch (processing) {
+            case 'moving_average':
+              processedData = await executeProcess(
+                tagName, 
+                'moving_average', 
+                { window: windowSize || 5 }, 
+                { start, end }
+              );
+              processingInfo.type = 'moving_average';
+              processingInfo.window = windowSize || 5;
+              break;
+              
+            case 'zscore':
+              processedData = await executeProcess(
+                tagName, 
+                'zscore', 
+                { window: windowSize }, 
+                { start, end }
+              );
+              processingInfo.type = 'zscore';
+              processingInfo.window = windowSize;
+              break;
+              
+            case 'deviation':
+              processedData = await executeProcess(
+                tagName, 
+                'deviation', 
+                { window: windowSize }, 
+                { start, end }
+              );
+              processingInfo.type = 'deviation';
+              processingInfo.window = windowSize;
+              break;
+          }
+        } catch (error) {
+          console.error(`処理オプション適用中にエラーが発生しました (${tagName}): ${error.message}`);
+          // エラーが発生しても処理を続行し、そのタグは元のデータを使用
+        }
+      }
       
       // 値0をnullとして扱うオプションの処理
       if (shouldTreatZeroAsNull) {
@@ -209,10 +346,18 @@ router.get('/api/batch', async (req, res) => {
         });
       }
       
-      result[tagName] = {
+      // タグ結果の作成
+      const tagResult = {
         metadata: metadataMap[tagName],
         data: processedData
       };
+      
+      // 処理情報を追加（処理が適用された場合のみ）
+      if (processing && Object.keys(processingInfo).length > 0) {
+        tagResult.processing = processingInfo;
+      }
+      
+      result[tagName] = tagResult;
     }
     
     // gtagの処理
@@ -356,7 +501,9 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     showUnit = 'false',
     skipInvalidValues = 'true', // 不定値（Infinity、NaNなど）を空セルとして出力するかどうか
     zeroAsNull = 'false', // 値0をnull（空白）として出力するかどうか
-    zeroAsNullTags = '' // 特定のタグのみ値0をnull（空白）として出力するためのカンマ区切りタグリスト
+    zeroAsNullTags = '', // 特定のタグのみ値0をnull（空白）として出力するためのカンマ区切りタグリスト
+    processing, // 処理タイプ（moving_average, zscore, deviation）
+    window // 処理窓サイズ
   } = req.query;
   
   try {
@@ -476,6 +623,49 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
         
         query += ' ORDER BY timestamp';
         data = db.prepare(query).all(...params);
+        
+        // 処理オプションの適用
+        if (processing && !isGtag) {
+          const tagName = tagIdToName.get(tagId);
+          if (tagName) {
+            const windowSize = window ? parseInt(window, 10) : null;
+            const { executeProcess } = require('../utils/gtag-utils');
+            
+            try {
+              switch (processing) {
+                case 'moving_average':
+                  data = await executeProcess(
+                    tagName, 
+                    'moving_average', 
+                    { window: windowSize || 5 }, 
+                    { start, end }
+                  );
+                  break;
+                  
+                case 'zscore':
+                  data = await executeProcess(
+                    tagName, 
+                    'zscore', 
+                    { window: windowSize }, 
+                    { start, end }
+                  );
+                  break;
+                  
+                case 'deviation':
+                  data = await executeProcess(
+                    tagName, 
+                    'deviation', 
+                    { window: windowSize }, 
+                    { start, end }
+                  );
+                  break;
+              }
+            } catch (error) {
+              console.error(`CSVエクスポート: タグ ${tagName} の処理オプション適用中にエラーが発生しました: ${error.message}`);
+              // エラーが発生しても処理を続行
+            }
+          }
+        }
       }
       
       // タイムシフトを適用
