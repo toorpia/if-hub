@@ -9,8 +9,6 @@ const os = require('os');
 
 // gtag設定
 const GTAG_DIR = path.join(process.cwd(), 'gtags');
-const GTAG_DEFINITIONS_DIR = path.join(GTAG_DIR, 'definitions');
-const GTAG_SCRIPTS_DIR = path.join(GTAG_DIR, 'scripts');
 
 // ファイルチェックサム管理
 const gtagChecksums = new Map();
@@ -31,34 +29,79 @@ function calculateGtagChecksum(filePath) {
  */
 function detectChangedGtagFiles() {
   try {
-    if (!fs.existsSync(GTAG_DEFINITIONS_DIR)) {
-      fs.mkdirpSync(GTAG_DEFINITIONS_DIR);
+    if (!fs.existsSync(GTAG_DIR)) {
+      fs.mkdirpSync(GTAG_DIR);
       return [];
     }
 
-    const files = fs.readdirSync(GTAG_DEFINITIONS_DIR);
+    // gtagディレクトリを検索
+    const gtagDirs = fs.readdirSync(GTAG_DIR, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+
     const changedFiles = [];
 
-    for (const file of files) {
-      if (path.extname(file) !== '.json') continue;
-
-      const filePath = path.join(GTAG_DEFINITIONS_DIR, file);
-      const checksum = calculateGtagChecksum(filePath);
-      const oldChecksum = gtagChecksums.get(filePath);
+    for (const gtagName of gtagDirs) {
+      const defPath = path.join(GTAG_DIR, gtagName, 'def.json');
+      
+      // def.jsonが存在するか確認
+      if (!fs.existsSync(defPath)) continue;
+      
+      const checksum = calculateGtagChecksum(defPath);
+      const oldChecksum = gtagChecksums.get(defPath);
 
       if (oldChecksum !== checksum) {
         changedFiles.push({
-          path: filePath,
-          name: file,
+          path: defPath,
+          name: gtagName,
           checksum
         });
-        gtagChecksums.set(filePath, checksum);
+        gtagChecksums.set(defPath, checksum);
       }
     }
 
     return changedFiles;
   } catch (error) {
     console.error('gtag定義ファイルの検出中にエラーが発生しました:', error);
+    return [];
+  }
+}
+
+/**
+ * 柔軟なタグ識別子を解析して適切なタグを見つける
+ * @param {string|number} identifier - タグ識別子
+ * @returns {Array<Object>} 見つかったタグのリスト
+ */
+function resolveTagIdentifier(identifier) {
+  try {
+    // 整数の場合はタグIDとして使用
+    if (typeof identifier === 'number' || /^\d+$/.test(identifier)) {
+      const tagId = parseInt(identifier, 10);
+      const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId);
+      return tag ? [tag] : [];
+    }
+    
+    // 文字列の場合
+    if (typeof identifier === 'string') {
+      // ピリオドを含む場合はタグ名として検索
+      if (identifier.includes('.')) {
+        const tag = db.prepare('SELECT * FROM tags WHERE name = ?').get(identifier);
+        return tag ? [tag] : [];
+      }
+      
+      // コロンを含む場合は「設備:ソースタグ」として解釈
+      if (identifier.includes(':')) {
+        const [equipment, sourceTag] = identifier.split(':');
+        return db.prepare('SELECT * FROM tags WHERE equipment = ? AND source_tag = ?').all(equipment, sourceTag);
+      }
+      
+      // それ以外はソースタグとして検索
+      return db.prepare('SELECT * FROM tags WHERE source_tag = ?').all(identifier);
+    }
+    
+    return [];
+  } catch (error) {
+    console.error(`タグ識別子の解決中にエラーが発生しました: ${identifier}`, error);
     return [];
   }
 }
@@ -71,12 +114,27 @@ async function importGtagDefinition(fileInfo) {
   try {
     const fileContent = await fs.readJson(fileInfo.path);
     
-    if (!fileContent.name || !fileContent.equipment || !fileContent.type) {
+    if (!fileContent.name || !fileContent.type) {
       throw new Error(`必須フィールドが不足しています: ${fileInfo.name}`);
     }
     
+    // 設備名を抽出（タグ名から設備部分を取得）
+    const equipment = fileContent.name.includes('.') 
+      ? fileContent.name.split('.')[0] 
+      : '';
+    
     // 現在のタイムスタンプ
     const now = new Date().toISOString();
+    
+    // 入力を処理
+    const inputs = Array.isArray(fileContent.inputs) ? fileContent.inputs : [];
+    
+    // 保存用の定義オブジェクトを作成
+    const definition = {
+      ...fileContent,
+      equipment: equipment,
+      sourceTags: inputs
+    };
     
     // gtagsテーブルに挿入または更新
     const existingGtag = db.prepare('SELECT id FROM gtags WHERE name = ?').get(fileContent.name);
@@ -88,11 +146,11 @@ async function importGtagDefinition(fileInfo) {
         SET equipment = ?, description = ?, unit = ?, type = ?, definition = ?, updated_at = ?
         WHERE id = ?
       `).run(
-        fileContent.equipment,
+        equipment,
         fileContent.description || '',
         fileContent.unit || '',
         fileContent.type,
-        JSON.stringify(fileContent),
+        JSON.stringify(definition),
         now,
         existingGtag.id
       );
@@ -104,18 +162,18 @@ async function importGtagDefinition(fileInfo) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         fileContent.name,
-        fileContent.equipment,
+        equipment,
         fileContent.description || '',
         fileContent.unit || '',
         fileContent.type,
-        JSON.stringify(fileContent),
+        JSON.stringify(definition),
         now,
         now
       );
       console.log(`新しいgtag「${fileContent.name}」を登録しました（ID: ${result.lastInsertRowid}）`);
     }
     
-    return fileContent;
+    return definition;
   } catch (error) {
     console.error(`gtag定義のインポート中にエラーが発生しました (${fileInfo.name}):`, error);
     throw error;
@@ -127,30 +185,38 @@ async function importGtagDefinition(fileInfo) {
  */
 async function loadAllGtagDefinitions() {
   try {
-    if (!fs.existsSync(GTAG_DEFINITIONS_DIR)) {
-      fs.mkdirpSync(GTAG_DEFINITIONS_DIR);
+    if (!fs.existsSync(GTAG_DIR)) {
+      fs.mkdirpSync(GTAG_DIR);
       return;
     }
     
-    const files = fs.readdirSync(GTAG_DEFINITIONS_DIR)
-      .filter(file => path.extname(file) === '.json');
+    // gtagディレクトリを検索
+    const gtagDirs = fs.readdirSync(GTAG_DIR, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
     
-    console.log(`${files.length}個のgtag定義ファイルを読み込みます`);
+    console.log(`${gtagDirs.length}個のgtagディレクトリを検出しました`);
     
-    for (const file of files) {
-      const filePath = path.join(GTAG_DEFINITIONS_DIR, file);
+    for (const gtagName of gtagDirs) {
+      const defPath = path.join(GTAG_DIR, gtagName, 'def.json');
+      
+      // def.jsonが存在するか確認
+      if (!fs.existsSync(defPath)) {
+        console.warn(`gtag「${gtagName}」のdef.jsonが見つかりません`);
+        continue;
+      }
       
       try {
         const fileInfo = {
-          path: filePath,
-          name: file,
-          checksum: calculateGtagChecksum(filePath)
+          path: defPath,
+          name: gtagName,
+          checksum: calculateGtagChecksum(defPath)
         };
         
         await importGtagDefinition(fileInfo);
-        gtagChecksums.set(filePath, fileInfo.checksum);
+        gtagChecksums.set(defPath, fileInfo.checksum);
       } catch (error) {
-        console.error(`gtag定義「${file}」のロード中にエラーが発生しました:`, error);
+        console.error(`gtag定義「${gtagName}」のロード中にエラーが発生しました:`, error);
       }
     }
     
@@ -163,21 +229,26 @@ async function loadAllGtagDefinitions() {
 /**
  * 式を評価
  * @param {string} expression - 評価する式
- * @param {Object} tagValues - タグIDと値のマッピング
+ * @param {Array} inputValues - 入力値の配列
  * @returns {number} 計算結果
  */
-function evaluateExpression(expression, tagValues) {
-  // タグIDを実際の値に置換
-  let evalReady = expression;
-  
-  for (const [tagId, value] of Object.entries(tagValues)) {
-    // タグIDに特殊文字が含まれている可能性があるため、正規表現エスケープ
-    const escapedTagId = tagId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escapedTagId, 'g');
-    evalReady = evalReady.replace(regex, value);
+function evaluateExpression(expression, inputValues) {
+  try {
+    // inputs[0], inputs[1]などの参照を実際の値に置換
+    let evalReady = expression;
+    
+    // inputs[n]形式の参照を置換
+    for (let i = 0; i < inputValues.length; i++) {
+      const pattern = new RegExp(`inputs\\[${i}\\]`, 'g');
+      evalReady = evalReady.replace(pattern, inputValues[i]);
+    }
+    
+    // 計算式を評価
+    return mathjs.evaluate(evalReady);
+  } catch (error) {
+    console.error(`式の評価中にエラーが発生しました: ${expression}`, error);
+    throw error;
   }
-  
-  return mathjs.evaluate(evalReady);
 }
 
 /**
@@ -205,16 +276,120 @@ function findClosestDataPoint(tagPoints, targetTimestamp) {
 }
 
 /**
- * 四則演算の計算を実行
+ * 移動平均を計算
+ * @param {Array} data - 計算対象のデータ
+ * @param {number} windowSize - 窓サイズ
+ * @returns {Array} 計算結果
+ */
+function calculateMovingAverage(data, windowSize = 5) {
+  if (!data || data.length === 0) return [];
+  
+  // タイムスタンプでソート
+  const sortedData = [...data].sort((a, b) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  
+  const result = [];
+  for (let i = 0; i < sortedData.length; i++) {
+    // 窓内のデータポイントを取得
+    const windowStart = Math.max(0, i - windowSize + 1);
+    const window = sortedData.slice(windowStart, i + 1);
+    
+    // 平均値を計算
+    const sum = window.reduce((acc, point) => acc + point.value, 0);
+    const average = sum / window.length;
+    
+    result.push({
+      timestamp: sortedData[i].timestamp,
+      value: average,
+      original: sortedData[i].value
+    });
+  }
+  
+  return result;
+}
+
+/**
+ * Z-scoreを計算
+ * @param {Array} data - 計算対象のデータ
+ * @param {number} windowSize - 窓サイズ (nullの場合は全データを使用)
+ * @returns {Array} 計算結果
+ */
+function calculateZScore(data, windowSize = null) {
+  if (!data || data.length === 0) return [];
+  
+  // タイムスタンプでソート
+  const sortedData = [...data].sort((a, b) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  
+  const result = [];
+  for (let i = 0; i < sortedData.length; i++) {
+    // 窓の範囲を計算
+    let window;
+    if (windowSize) {
+      const windowStart = Math.max(0, i - windowSize + 1);
+      window = sortedData.slice(windowStart, i + 1);
+    } else {
+      window = sortedData.slice(0, i + 1);
+    }
+    
+    // 平均と標準偏差を計算
+    const values = window.map(point => point.value);
+    const mean = values.reduce((acc, val) => acc + val, 0) / values.length;
+    
+    const squaredDiffs = values.map(val => Math.pow(val - mean, 2));
+    const variance = squaredDiffs.reduce((acc, val) => acc + val, 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Z-scoreを計算 (標準偏差が0の場合は0を返す)
+    const zScore = stdDev === 0 ? 0 : (sortedData[i].value - mean) / stdDev;
+    
+    result.push({
+      timestamp: sortedData[i].timestamp,
+      value: zScore,
+      original: sortedData[i].value,
+      mean: mean,
+      stdDev: stdDev
+    });
+  }
+  
+  return result;
+}
+
+/**
+ * 偏差値を計算
+ * @param {Array} data - 計算対象のデータ
+ * @param {number} windowSize - 窓サイズ (nullの場合は全データを使用)
+ * @returns {Array} 計算結果
+ */
+function calculateDeviation(data, windowSize = null) {
+  if (!data || data.length === 0) return [];
+  
+  // Z-scoreを計算
+  const zScores = calculateZScore(data, windowSize);
+  
+  // 偏差値に変換 (Z-score * 10 + 50)
+  return zScores.map(point => ({
+    timestamp: point.timestamp,
+    value: point.value * 10 + 50,
+    original: point.original,
+    mean: point.mean,
+    stdDev: point.stdDev
+  }));
+}
+
+/**
+ * 式ベースの計算を実行
  * @param {string} expression - 計算式
- * @param {Object} sourceTagData - ソースタグのデータ
+ * @param {Object} inputTagsData - 入力タグのデータ
  * @returns {Array} 計算結果の配列
  */
-function calculateExpressionData(expression, sourceTagData) {
-  // すべてのソースタグのタイムスタンプを統合してユニークにする
+function calculateExpressionData(expression, inputTagsData) {
+  // すべての入力タグのタイムスタンプを統合してユニークにする
   const allTimestamps = new Set();
   
-  Object.values(sourceTagData).forEach(tagPoints => {
+  Object.values(inputTagsData).forEach(tagPoints => {
     tagPoints.forEach(point => allTimestamps.add(point.timestamp));
   });
   
@@ -226,25 +401,28 @@ function calculateExpressionData(expression, sourceTagData) {
   
   for (const timestamp of sortedTimestamps) {
     // このタイムスタンプでの各タグの値を取得
-    const tagValues = {};
+    const inputValues = [];
+    let allInputsHaveData = true;
     
-    let allTagsHaveData = true;
-    for (const [tagId, tagPoints] of Object.entries(sourceTagData)) {
+    for (let i = 0; i < Object.keys(inputTagsData).length; i++) {
+      const tagId = Object.keys(inputTagsData)[i];
+      const tagData = inputTagsData[tagId];
+      
       // 最も近いデータポイントを探す
-      const closestPoint = findClosestDataPoint(tagPoints, timestamp);
+      const closestPoint = findClosestDataPoint(tagData, timestamp);
       
       if (!closestPoint) {
-        allTagsHaveData = false;
+        allInputsHaveData = false;
         break;
       }
       
-      tagValues[tagId] = closestPoint.value;
+      inputValues[i] = closestPoint.value;
     }
     
-    if (allTagsHaveData) {
+    if (allInputsHaveData) {
       // 式を評価
       try {
-        const value = evaluateExpression(expression, tagValues);
+        const value = evaluateExpression(expression, inputValues);
         result.push({
           timestamp,
           value
@@ -259,20 +437,20 @@ function calculateExpressionData(expression, sourceTagData) {
 }
 
 /**
- * Python関数を実行
- * @param {string} script - スクリプト名
+ * カスタムPython関数を実行
+ * @param {string} implementationPath - 実装ファイルパス
  * @param {string} functionName - 関数名
  * @param {Object} params - 関数パラメータ
- * @param {Object} tagData - タグデータ
+ * @param {Object} inputTagsData - 入力タグのデータ
  * @returns {Promise<Array>} 実行結果
  */
-async function executePythonFunction(script, functionName, params, tagData) {
+async function executeCustomImplementation(implementationPath, functionName, params, inputTagsData) {
   try {
     // 一時ファイルに入力データを書き込む
     const inputFile = path.join(os.tmpdir(), `gtag_input_${Date.now()}.json`);
     const outputFile = path.join(os.tmpdir(), `gtag_output_${Date.now()}.json`);
     
-    await fs.writeJson(inputFile, { tagData, params });
+    await fs.writeJson(inputFile, { inputTagsData, params });
     
     // 実行結果の保存先
     let result = [];
@@ -280,14 +458,18 @@ async function executePythonFunction(script, functionName, params, tagData) {
     try {
       // スクリプトを実行
       await new Promise((resolve, reject) => {
-        const scriptPath = path.join(GTAG_SCRIPTS_DIR, script);
-        if (!fs.existsSync(scriptPath)) {
-          reject(new Error(`スクリプト「${script}」が見つかりません`));
+        // 実装ファイルのフルパスを解決
+        const scriptFullPath = path.isAbsolute(implementationPath) 
+          ? implementationPath 
+          : path.resolve(GTAG_DIR, implementationPath);
+        
+        if (!fs.existsSync(scriptFullPath)) {
+          reject(new Error(`実装ファイル「${scriptFullPath}」が見つかりません`));
           return;
         }
         
         const proc = spawn('python', [
-          scriptPath,
+          scriptFullPath,
           '--function', functionName,
           '--input', inputFile,
           '--output', outputFile
@@ -324,9 +506,52 @@ async function executePythonFunction(script, functionName, params, tagData) {
     
     return result;
   } catch (error) {
-    console.error(`Python関数実行中にエラーが発生しました:`, error);
+    console.error(`カスタム実装実行中にエラーが発生しました:`, error);
     throw error;
   }
+}
+
+/**
+ * 入力タグのデータを取得
+ * @param {Array} inputs - 入力タグ識別子の配列
+ * @param {Object} options - 取得オプション（start、endなど）
+ * @returns {Promise<Object>} タグ識別子をキーとするデータオブジェクト
+ */
+async function getInputTagsData(inputs, options = {}) {
+  const { start, end } = options;
+  const inputTagsData = {};
+  
+  for (const input of inputs) {
+    // タグ識別子を解決
+    const tags = resolveTagIdentifier(input);
+    
+    if (tags.length === 0) {
+      console.warn(`入力タグ「${input}」が見つかりません。スキップします。`);
+      continue;
+    }
+    
+    // 複数のタグが見つかった場合は最初のものを使用
+    const tag = tags[0];
+    
+    // タグデータを取得
+    let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+    const params = [tag.id];
+    
+    if (start) {
+      query += ' AND timestamp >= ?';
+      params.push(new Date(start).toISOString());
+    }
+    
+    if (end) {
+      query += ' AND timestamp <= ?';
+      params.push(new Date(end).toISOString());
+    }
+    
+    query += ' ORDER BY timestamp';
+    inputTagsData[input] = db.prepare(query).all(...params);
+  }
+  
+  return inputTagsData;
 }
 
 /**
@@ -341,57 +566,152 @@ async function getGtagData(gtag, options = {}) {
       ? JSON.parse(gtag.definition) 
       : gtag.definition;
     
-    const { start, end } = options;
+    // 入力タグのデータを取得
+    const inputs = definition.inputs || definition.sourceTags || [];
+    const inputTagsData = await getInputTagsData(inputs, options);
     
-    // ソースタグのデータを取得
-    const sourceTagData = {};
-    
-    for (const sourceTagName of definition.sourceTags) {
-      // テキスト形式のタグ名から整数IDを取得
-      const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(sourceTagName);
-      
-      if (!tag) {
-        console.warn(`ソースタグ「${sourceTagName}」が見つかりません。スキップします。`);
-        continue;
-      }
-      
-      // 整数IDを使用してタグデータを取得
-      let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
-      const params = [tag.id]; // 整数型のtag_id
-      
-      if (start) {
-        query += ' AND timestamp >= ?';
-        params.push(new Date(start).toISOString());
-      }
-      
-      if (end) {
-        query += ' AND timestamp <= ?';
-        params.push(new Date(end).toISOString());
-      }
-      
-      query += ' ORDER BY timestamp';
-      sourceTagData[sourceTagName] = db.prepare(query).all(...params);
+    if (Object.keys(inputTagsData).length === 0) {
+      return [];
     }
     
-    // gtagの種類に応じて計算
+    // タイプに応じて処理を実行
     let gtagData;
     
-    if (definition.type === 'calculation') {
-      gtagData = calculateExpressionData(definition.expression, sourceTagData);
-    } else if (definition.type === 'python') {
-      gtagData = await executePythonFunction(
-        definition.script,
-        definition.function,
-        definition.parameters || {},
-        sourceTagData
-      );
-    } else {
-      throw new Error(`未対応のgtag種類: ${definition.type}`);
+    switch (definition.type) {
+      case 'calculation':
+        gtagData = calculateExpressionData(definition.expression, inputTagsData);
+        break;
+        
+      case 'moving_average':
+        // 単一入力の移動平均
+        if (inputs.length !== 1) {
+          throw new Error('移動平均は単一の入力が必要です');
+        }
+        gtagData = calculateMovingAverage(
+          inputTagsData[inputs[0]], 
+          definition.window || 5
+        );
+        break;
+        
+      case 'zscore':
+        // 単一入力のZ-score
+        if (inputs.length !== 1) {
+          throw new Error('Z-scoreは単一の入力が必要です');
+        }
+        gtagData = calculateZScore(
+          inputTagsData[inputs[0]], 
+          definition.window
+        );
+        break;
+        
+      case 'deviation':
+        // 単一入力の偏差値
+        if (inputs.length !== 1) {
+          throw new Error('偏差値は単一の入力が必要です');
+        }
+        gtagData = calculateDeviation(
+          inputTagsData[inputs[0]], 
+          definition.window
+        );
+        break;
+        
+      case 'custom':
+        // カスタム実装（Pythonなど）
+        if (!definition.implementation) {
+          throw new Error('カスタム実装には実装ファイルパスが必要です');
+        }
+        
+        // gtagディレクトリからの相対パスを構築
+        const implementationPath = path.isAbsolute(definition.implementation)
+          ? definition.implementation
+          : path.join(GTAG_DIR, gtag.name, definition.implementation);
+          
+        gtagData = await executeCustomImplementation(
+          implementationPath,
+          definition.function || 'process',
+          definition.params || {},
+          inputTagsData
+        );
+        break;
+        
+      case 'raw':
+        // 単一入力のrawデータ
+        if (inputs.length !== 1) {
+          throw new Error('rawタイプは単一の入力が必要です');
+        }
+        gtagData = inputTagsData[inputs[0]].map(point => ({
+          timestamp: point.timestamp,
+          value: point.value
+        }));
+        break;
+        
+      default:
+        throw new Error(`未対応のgtag種類: ${definition.type}`);
     }
     
     return gtagData;
   } catch (error) {
     console.error(`gtagデータの取得中にエラーが発生しました (${gtag.name}):`, error);
+    throw error;
+  }
+}
+
+/**
+ * 動的プロセスの実行
+ * @param {string} target - 対象タグ識別子
+ * @param {string} type - 処理タイプ
+ * @param {Object} params - 処理パラメータ
+ * @param {Object} options - 取得オプション
+ * @returns {Promise<Array>} 処理結果
+ */
+async function executeProcess(target, type, params = {}, options = {}) {
+  try {
+    // 対象タグの取得
+    const tags = resolveTagIdentifier(target);
+    
+    if (tags.length === 0) {
+      throw new Error(`対象タグ「${target}」が見つかりません`);
+    }
+    
+    // 対象タグのデータを取得
+    const tag = tags[0];
+    const inputTagsData = await getInputTagsData([tag.name], options);
+    
+    if (Object.keys(inputTagsData).length === 0 || !inputTagsData[tag.name] || inputTagsData[tag.name].length === 0) {
+      return [];
+    }
+    
+    // タイプに応じて処理を実行
+    switch (type) {
+      case 'moving_average':
+        return calculateMovingAverage(
+          inputTagsData[tag.name], 
+          params.window || 5
+        );
+        
+      case 'zscore':
+        return calculateZScore(
+          inputTagsData[tag.name], 
+          params.window
+        );
+        
+      case 'deviation':
+        return calculateDeviation(
+          inputTagsData[tag.name], 
+          params.window
+        );
+        
+      case 'raw':
+        return inputTagsData[tag.name].map(point => ({
+          timestamp: point.timestamp,
+          value: point.value
+        }));
+        
+      default:
+        throw new Error(`未対応の処理タイプ: ${type}`);
+    }
+  } catch (error) {
+    console.error(`プロセス実行中にエラーが発生しました (${target}, ${type}):`, error);
     throw error;
   }
 }
@@ -437,8 +757,13 @@ module.exports = {
   detectChangedGtagFiles,
   importGtagDefinition,
   getGtagData,
+  executeProcess,
+  resolveTagIdentifier,
   evaluateExpression,
   calculateExpressionData,
-  executePythonFunction,
+  calculateMovingAverage,
+  calculateZScore,
+  calculateDeviation,
+  executeCustomImplementation,
   gtagChecksums
 };
