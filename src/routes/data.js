@@ -307,7 +307,8 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     timeshift = 'false',
     display = 'false',
     lang = 'ja',
-    showUnit = 'false'
+    showUnit = 'false',
+    skipInvalidValues = 'true' // 不定値（Infinity、NaNなど）を空セルとして出力するかどうか
   } = req.query;
   
   try {
@@ -449,6 +450,21 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     const csvRows = sortedTimestamps.map(timestamp => {
       const values = allTagIds.map(tagId => {
         const value = tagData[tagId][timestamp];
+        
+        // skipInvalidValuesがtrueの場合、無効値チェック
+        if (skipInvalidValues === 'true') {
+          // 値が存在しないか、nullの場合は空文字を返す
+          if (value === undefined || value === null) {
+            return '';
+          }
+          
+          // 数値型だが、無限大またはNaNの場合は空文字を返す
+          if (typeof value === 'number' && !Number.isFinite(value)) {
+            return '';
+          }
+        }
+        
+        // 有効な値またはskipInvalidValues=falseの場合は値をそのまま返す
         return value !== undefined ? value : '';
       });
       return [timestamp, ...values].join(',');
