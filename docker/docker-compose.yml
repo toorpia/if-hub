@@ -12,6 +12,7 @@ services:
       - ../src:/app/src
       - ../static_equipment_data:/app/static_equipment_data
       - ../tag_metadata:/app/tag_metadata
+      - ../gtags:/app/gtags        # gtag定義とカスタム実装
       - ../logs:/app/logs
       - ../db:/app/db  # データベースファイル用のボリューム
       - ../package.json:/app/package.json
