@@ -54,23 +54,16 @@ async function initializeServer() {
         console.error(`CSVフォルダ ${csvPath} へのアクセス権がありません:`, accessError);
       }
       
-      // CSVファイル一覧を取得
-      const files = fs.readdirSync(csvPath).filter(file => file.endsWith('.csv'));
-      console.log(`${files.length}個のCSVファイルが見つかりました`);
+      // 変更があったCSVファイルのみを処理
+      const { detectChangedFiles } = require('../utils/file-watcher');
+      const changedFiles = detectChangedFiles();
+      console.log(`${changedFiles.length}個の新規または変更されたCSVファイルが見つかりました`);
       
-      if (files.length > 0) {
-        // すべてのCSVファイルを処理
-        console.log('すべてのCSVファイルを読み込みます');
+      if (changedFiles.length > 0) {
+        console.log('変更されたCSVファイルを処理します');
         
-        for (const file of files) {
-          const fileInfo = {
-            path: path.join(csvPath, file),
-            name: file,
-            equipmentId: path.basename(file, '.csv'),
-            checksum: 'force-import-' + Date.now() // 強制読み込み用の一時的なチェックサム
-          };
-          
-          console.log(`ファイル ${fileInfo.name} を処理中...`);
+        for (const fileInfo of changedFiles) {
+          console.log(`ファイル ${fileInfo.name} を処理中...（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
           try {
             await importSpecificCsvFile(fileInfo);
             console.log(`ファイル ${fileInfo.name} の処理が完了しました`);
@@ -80,9 +73,9 @@ async function initializeServer() {
           }
         }
         
-        console.log('すべてのCSVファイルの処理が完了しました');
+        console.log('変更されたCSVファイルの処理が完了しました');
       } else {
-        console.log('CSVファイルが見つかりませんでした');
+        console.log('処理が必要なCSVファイルはありません');
       }
     } catch (error) {
       console.error('CSVファイルのロード中にエラーが発生しました:', error);
