@@ -165,7 +165,7 @@ function setupFileWatchers() {
   }, 300000); // 5分間隔
   
   // 5分おきにgtag定義ファイルを監視
-  console.log(`gtag定義ファイル監視を開始します (間隔: 5分)`);
+  console.log(`gtag定義ファイル監視を開始します (間隔: 1分)`);
   setInterval(async () => {
     try {
       const changedGtagFiles = detectChangedGtagFiles();
@@ -186,7 +186,7 @@ function setupFileWatchers() {
     } catch (error) {
       console.error('gtag定義ファイル監視処理中にエラーが発生しました:', error);
     }
-  }, 300000); // 5分間隔
+  }, 60000); // 1分間隔
 }
 
 /**
