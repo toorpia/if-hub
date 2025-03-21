@@ -330,12 +330,14 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
     
     try {
       // 既存のタグを確認
+      console.log(`    タグID「${tagId}」の存在確認`);
       const existingTag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagId);
       
       let tagIdInt; // 整数型タグID
       
       if (existingTag) {
         // 既存のタグを更新
+        console.log(`    既存タグID(整数): ${existingTag.id} を更新`);
         db.prepare(`
           UPDATE tags SET equipment = ?, source_tag = ?, unit = ?, min = ?, max = ?
           WHERE id = ?
@@ -348,8 +350,10 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
           existingTag.id
         );
         tagIdInt = existingTag.id;
+        console.log(`    タグ更新完了: ${tagIdInt}`);
       } else {
         // 新しいタグを挿入
+        console.log(`    新規タグ「${tagId}」を作成`);
         const stmtTag = db.prepare(`
           INSERT INTO tags (name, equipment, source_tag, unit, min, max)
           VALUES (?, ?, ?, ?, ?, ?)
@@ -365,12 +369,15 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
         );
         
         tagIdInt = result.lastInsertRowid;
+        console.log(`    新規タグ作成完了: ${tagIdInt}`);
       }
       
       // タグにメタデータを適用
+      console.log(`    タグID(${tagIdInt})にメタデータを適用`);
       applyMetadataToTag(tagIdInt, header);
       
-      // 次にデータポイントを挿入
+      // データポイントを挿入
+      console.log(`    タグID(${tagIdInt})のデータポイント(${data.length}件)を挿入`);
       const stmtData = db.prepare(`
         INSERT OR REPLACE INTO tag_data (tag_id, timestamp, value)
         VALUES (?, ?, ?)
@@ -379,7 +386,13 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
       // データポイントをバッチで挿入
       const insertBatch = db.transaction((points) => {
         for (const point of points) {
-          stmtData.run(tagIdInt, point.timestamp, point.value);
+          try {
+            stmtData.run(tagIdInt, point.timestamp, point.value);
+          } catch (err) {
+            console.error(`    データポイント挿入エラー: tag_id=${tagIdInt}, timestamp=${point.timestamp}, value=${point.value}`);
+            console.error(`    エラー詳細: ${err.message}`);
+            throw err;
+          }
         }
       });
       
@@ -396,9 +409,11 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
       return { min, max, count: data.length };
     } catch (error) {
       db.exec('ROLLBACK');
+      console.error(`    タグID「${tagId}」の処理でエラー発生: ${error.message}`);
       throw error;
     }
   } catch (error) {
+    console.error(`    タグID「${tagId}」の処理に失敗: ${error.message}`);
     throw error;
   }
 }
@@ -469,28 +484,47 @@ async function importSpecificCsvFile(fileInfo) {
       .map(tag => tag.name);
     
     // タグ構成が変わっている場合、当該設備のデータを全削除
-    const tagsChanged = !arraysEqual(existingTags.sort(), tagHeaders.sort());
+    const tagsChanged = !arraysEqual(existingTags.sort(), tagHeaders.map(h => `${equipmentId}.${h}`).sort());
     
     // タグ構成変更時は設備データを削除（独立したトランザクションで）
     if (tagsChanged) {
       console.log(`  設備 ${equipmentId} のタグ構成が変更されました。既存データを削除します。`);
       
-      db.exec('BEGIN TRANSACTION');
-      try {
-        // 設備に関連するタグIDを取得（この時点でidは整数型）
-        const tagIds = db.prepare('SELECT id FROM tags WHERE equipment = ?').all(equipmentId);
-        
-        // タグデータを削除
-        for (const tag of tagIds) {
-          db.prepare('DELETE FROM tag_data WHERE tag_id = ?').run(tag.id);
+      // 既存のタグIDを取得
+      const tagIdsQuery = db.prepare('SELECT id FROM tags WHERE equipment = ?');
+      const tagIds = tagIdsQuery.all(equipmentId);
+      
+      // 削除が必要なタグIDリストを表示
+      console.log(`  削除対象のタグID: ${tagIds.map(t => t.id).join(', ')}`);
+      
+      if (tagIds.length > 0) {
+        db.exec('BEGIN TRANSACTION');
+        try {
+          // 重要: 最初に外部キーの対象である子テーブル(tag_data)から削除する
+          console.log(`  タグデータテーブルからデータを削除中...`);
+          const deleteDataStmt = db.prepare('DELETE FROM tag_data WHERE tag_id = ?');
+          
+          // 各タグのデータを削除
+          for (const tag of tagIds) {
+            console.log(`    タグID ${tag.id} のデータを削除`);
+            const result = deleteDataStmt.run(tag.id);
+            console.log(`    ${result.changes} 件のデータポイントを削除しました`);
+          }
+          
+          // 次にタグを削除
+          console.log(`  タグテーブルからタグを削除中...`);
+          const deleteTagsResult = db.prepare('DELETE FROM tags WHERE equipment = ?').run(equipmentId);
+          console.log(`  ${deleteTagsResult.changes} 件のタグを削除しました`);
+          
+          db.exec('COMMIT');
+          console.log(`  設備 ${equipmentId} の既存データ削除が完了しました`);
+        } catch (error) {
+          console.error(`  設備データ削除中にエラー発生: ${error.message}`);
+          db.exec('ROLLBACK');
+          throw error;
         }
-        
-        // タグを削除
-        db.prepare('DELETE FROM tags WHERE equipment = ?').run(equipmentId);
-        db.exec('COMMIT');
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
+      } else {
+        console.log(`  削除するタグがありません。`);
       }
     }
     
