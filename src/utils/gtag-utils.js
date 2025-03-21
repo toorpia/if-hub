@@ -519,9 +519,12 @@ async function executeCustomImplementation(implementationPath, functionName, par
           '--output', outputFile
         ];
         
-        console.log(`Python実行コマンド: python ${args.join(' ')}`);
+        // 環境に応じてpython3またはpythonコマンドを使用
+        const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
         
-        const proc = spawn('python', args);
+        console.log(`Python実行コマンド: ${pythonCommand} ${args.join(' ')}`);
+        
+        const proc = spawn(pythonCommand, args);
         
         let stderr = '';
         let stdout = '';
