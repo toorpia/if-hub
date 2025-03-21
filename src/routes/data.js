@@ -10,7 +10,7 @@ const config = require('../config');
 // 特定タグのデータ取得
 router.get('/api/data/:tagName', async (req, res) => {
   const { tagName } = req.params;
-  const { start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  const { start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
   
   try {
     // タグが通常タグかgtagかチェック
@@ -50,6 +50,16 @@ router.get('/api/data/:tagName', async (req, res) => {
       
       // タイムシフトを適用
       const processedData = shouldTimeShift ? getTimeShiftedData(gtagData, true) : gtagData;
+      
+      // 値0をnullとして扱うオプションの処理
+      const shouldTreatZeroAsNull = zeroAsNull === 'true';
+      if (shouldTreatZeroAsNull) {
+        processedData.forEach(point => {
+          if (point.value === 0) {
+            point.value = null;
+          }
+        });
+      }
       
       return res.json({
         tagId: tagName, // APIの互換性のためにtagNameを使用
@@ -97,6 +107,16 @@ router.get('/api/data/:tagName', async (req, res) => {
     // タイムシフトを適用
     const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
     
+    // 値0をnullとして扱うオプションの処理
+    const shouldTreatZeroAsNull = zeroAsNull === 'true';
+    if (shouldTreatZeroAsNull) {
+      processedData.forEach(point => {
+        if (point.value === 0) {
+          point.value = null;
+        }
+      });
+    }
+    
     res.json({
       tagId: tagName, // APIの互換性のためにtagNameを返す
       metadata,
@@ -110,7 +130,7 @@ router.get('/api/data/:tagName', async (req, res) => {
 
 // 複数タグの一括取得
 router.get('/api/batch', async (req, res) => {
-  const { tags, start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  const { tags, start, end, timeshift, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
   
   if (!tags) {
     return res.status(400).json({ error: 'Tags parameter is required' });
@@ -121,6 +141,7 @@ router.get('/api/batch', async (req, res) => {
     const shouldTimeShift = timeshift === 'true';
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
+    const shouldTreatZeroAsNull = zeroAsNull === 'true';
     const result = {};
     
     // 一括でメタデータを取得（通常タグ用）
@@ -179,6 +200,15 @@ router.get('/api/batch', async (req, res) => {
       // タイムシフトを適用
       const processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
       
+      // 値0をnullとして扱うオプションの処理
+      if (shouldTreatZeroAsNull) {
+        processedData.forEach(point => {
+          if (point.value === 0) {
+            point.value = null;
+          }
+        });
+      }
+      
       result[tagName] = {
         metadata: metadataMap[tagName],
         data: processedData
@@ -212,6 +242,15 @@ router.get('/api/batch', async (req, res) => {
         // タイムシフトを適用
         const processedData = shouldTimeShift ? getTimeShiftedData(gtagData, true) : gtagData;
         
+        // 値0をnullとして扱うオプションの処理
+        if (shouldTreatZeroAsNull) {
+          processedData.forEach(point => {
+            if (point.value === 0) {
+              point.value = null;
+            }
+          });
+        }
+        
         result[tagName] = {
           metadata,
           data: processedData
@@ -228,7 +267,7 @@ router.get('/api/batch', async (req, res) => {
 
 // 最新値取得（現在のポーリングをシミュレート）
 router.get('/api/current', (req, res) => {
-  const { tags, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
+  const { tags, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
   
   if (!tags) {
     return res.status(400).json({ error: 'Tags parameter is required' });
@@ -237,6 +276,7 @@ router.get('/api/current', (req, res) => {
   try {
     const tagNames = tags.split(',');
     const now = new Date();
+    const shouldTreatZeroAsNull = zeroAsNull === 'true';
     const result = {};
     
     // 一括でメタデータを取得（表示名オプション付き）
@@ -281,9 +321,15 @@ router.get('/api/current', (req, res) => {
             }
           }
           
+          // 値が0の場合にnullに変換
+          let value = closestPoint.value;
+          if (shouldTreatZeroAsNull && value === 0) {
+            value = null;
+          }
+          
           result[tagName] = {
             timestamp: closestPoint.timestamp,
-            value: closestPoint.value,
+            value: value,
             metadata: metadataMap[tagName]
           };
         }
@@ -308,7 +354,9 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     display = 'false',
     lang = 'ja',
     showUnit = 'false',
-    skipInvalidValues = 'true' // 不定値（Infinity、NaNなど）を空セルとして出力するかどうか
+    skipInvalidValues = 'true', // 不定値（Infinity、NaNなど）を空セルとして出力するかどうか
+    zeroAsNull = 'false', // 値0をnull（空白）として出力するかどうか
+    zeroAsNullTags = '' // 特定のタグのみ値0をnull（空白）として出力するためのカンマ区切りタグリスト
   } = req.query;
   
   try {
@@ -447,9 +495,28 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     const sortedTimestamps = Array.from(timestamps).sort();
     
     // CSVレコードの生成
+    const shouldTreatZeroAsNull = zeroAsNull === 'true';
+    const zeroAsNullTagsList = zeroAsNullTags.split(',').filter(tag => tag.trim() !== '');
+    
+    // タグIDからタグ名への変換マップを作成
+    const idToNameMap = new Map();
+    for (const tagId of normalTagIds) {
+      const name = tagIdToName.get(tagId);
+      if (name) {
+        idToNameMap.set(tagId, name);
+      }
+    }
+    for (const gtagId of gtagIds) {
+      const name = gtagIdToName.get(gtagId);
+      if (name) {
+        idToNameMap.set(gtagId, name);
+      }
+    }
+    
     const csvRows = sortedTimestamps.map(timestamp => {
       const values = allTagIds.map(tagId => {
         const value = tagData[tagId][timestamp];
+        const tagName = idToNameMap.get(tagId);
         
         // skipInvalidValuesがtrueの場合、無効値チェック
         if (skipInvalidValues === 'true') {
@@ -461,6 +528,21 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
           // 数値型だが、無限大またはNaNの場合は空文字を返す
           if (typeof value === 'number' && !Number.isFinite(value)) {
             return '';
+          }
+        }
+        
+        // 値0をnullとして扱うオプション
+        if (value === 0) {
+          // 全タグに適用するグローバル設定がオンの場合
+          if (shouldTreatZeroAsNull) {
+            return '';
+          }
+          
+          // 特定のタグに適用する場合
+          if (zeroAsNullTagsList.length > 0 && tagName) {
+            if (zeroAsNullTagsList.includes(tagName)) {
+              return '';
+            }
           }
         }
         
