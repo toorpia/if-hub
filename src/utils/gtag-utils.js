@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const { db } = require('../db');
 const mathjs = require('mathjs');
 const os = require('os');
+const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('./data-processing');
 
 // gtag設定
 const GTAG_DIR = path.join(process.cwd(), 'gtags');
@@ -306,109 +307,6 @@ function findClosestDataPoint(tagPoints, targetTimestamp) {
   return closestPoint;
 }
 
-/**
- * 移動平均を計算
- * @param {Array} data - 計算対象のデータ
- * @param {number} windowSize - 窓サイズ
- * @returns {Array} 計算結果
- */
-function calculateMovingAverage(data, windowSize = 5) {
-  if (!data || data.length === 0) return [];
-  
-  // タイムスタンプでソート
-  const sortedData = [...data].sort((a, b) => 
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-  
-  const result = [];
-  for (let i = 0; i < sortedData.length; i++) {
-    // 窓内のデータポイントを取得
-    const windowStart = Math.max(0, i - windowSize + 1);
-    const window = sortedData.slice(windowStart, i + 1);
-    
-    // 平均値を計算
-    const sum = window.reduce((acc, point) => acc + point.value, 0);
-    const average = sum / window.length;
-    
-    result.push({
-      timestamp: sortedData[i].timestamp,
-      value: average,
-      original: sortedData[i].value
-    });
-  }
-  
-  return result;
-}
-
-/**
- * Z-scoreを計算
- * @param {Array} data - 計算対象のデータ
- * @param {number} windowSize - 窓サイズ (nullの場合は全データを使用)
- * @returns {Array} 計算結果
- */
-function calculateZScore(data, windowSize = null) {
-  if (!data || data.length === 0) return [];
-  
-  // タイムスタンプでソート
-  const sortedData = [...data].sort((a, b) => 
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-  
-  const result = [];
-  for (let i = 0; i < sortedData.length; i++) {
-    // 窓の範囲を計算
-    let window;
-    if (windowSize) {
-      const windowStart = Math.max(0, i - windowSize + 1);
-      window = sortedData.slice(windowStart, i + 1);
-    } else {
-      window = sortedData.slice(0, i + 1);
-    }
-    
-    // 平均と標準偏差を計算
-    const values = window.map(point => point.value);
-    const mean = values.reduce((acc, val) => acc + val, 0) / values.length;
-    
-    const squaredDiffs = values.map(val => Math.pow(val - mean, 2));
-    const variance = squaredDiffs.reduce((acc, val) => acc + val, 0) / values.length;
-    const stdDev = Math.sqrt(variance);
-    
-    // Z-scoreを計算 (標準偏差が0の場合は0を返す)
-    const zScore = stdDev === 0 ? 0 : (sortedData[i].value - mean) / stdDev;
-    
-    result.push({
-      timestamp: sortedData[i].timestamp,
-      value: zScore,
-      original: sortedData[i].value,
-      mean: mean,
-      stdDev: stdDev
-    });
-  }
-  
-  return result;
-}
-
-/**
- * 偏差値を計算
- * @param {Array} data - 計算対象のデータ
- * @param {number} windowSize - 窓サイズ (nullの場合は全データを使用)
- * @returns {Array} 計算結果
- */
-function calculateDeviation(data, windowSize = null) {
-  if (!data || data.length === 0) return [];
-  
-  // Z-scoreを計算
-  const zScores = calculateZScore(data, windowSize);
-  
-  // 偏差値に変換 (Z-score * 10 + 50)
-  return zScores.map(point => ({
-    timestamp: point.timestamp,
-    value: point.value * 10 + 50,
-    original: point.original,
-    mean: point.mean,
-    stdDev: point.stdDev
-  }));
-}
 
 /**
  * 式ベースの計算を実行
@@ -689,40 +587,6 @@ async function getGtagData(gtag, options = {}) {
         gtagData = calculateExpressionData(definition.expression, inputTagsData);
         break;
         
-      case 'moving_average':
-        // 単一入力の移動平均
-        if (inputs.length !== 1) {
-          throw new Error('移動平均は単一の入力が必要です');
-        }
-        gtagData = calculateMovingAverage(
-          inputTagsData[inputs[0]], 
-          definition.window || 5
-        );
-        break;
-        
-      case 'zscore':
-        // 単一入力のZ-score
-        if (inputs.length !== 1) {
-          throw new Error('Z-scoreは単一の入力が必要です');
-        }
-        gtagData = calculateZScore(
-          inputTagsData[inputs[0]], 
-          definition.window
-        );
-        break;
-        
-      case 'deviation':
-        // 単一入力の偏差値
-        if (inputs.length !== 1) {
-          throw new Error('偏差値は単一の入力が必要です');
-        }
-        gtagData = calculateDeviation(
-          inputTagsData[inputs[0]], 
-          definition.window
-        );
-        break;
-        
-      case 'python': // pythonタイプはcustomタイプと同じ処理を行う
       case 'custom':
         // カスタム実装（Pythonなど）
         // 実行ファイルパスの決定（progフィールドを優先）
