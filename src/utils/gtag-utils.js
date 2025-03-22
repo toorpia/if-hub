@@ -587,6 +587,42 @@ async function getGtagData(gtag, options = {}) {
         gtagData = calculateExpressionData(definition.expression, inputTagsData);
         break;
         
+      case 'moving_average':
+        // 単一入力の確認
+        if (inputs.length !== 1) {
+          throw new Error('moving_averageタイプは単一の入力が必要です');
+        }
+        // 移動平均計算関数を使用
+        gtagData = calculateMovingAverage(
+          inputTagsData[inputs[0]],
+          definition.window || 5
+        );
+        break;
+        
+      case 'zscore':
+        // 単一入力の確認
+        if (inputs.length !== 1) {
+          throw new Error('zscoreタイプは単一の入力が必要です');
+        }
+        // Z-score計算関数を使用
+        gtagData = calculateZScore(
+          inputTagsData[inputs[0]],
+          definition.window
+        );
+        break;
+        
+      case 'deviation':
+        // 単一入力の確認
+        if (inputs.length !== 1) {
+          throw new Error('deviationタイプは単一の入力が必要です');
+        }
+        // 偏差値計算関数を使用
+        gtagData = calculateDeviation(
+          inputTagsData[inputs[0]],
+          definition.window
+        );
+        break;
+
       case 'custom':
         // カスタム実装（Pythonなど）
         // 実行ファイルパスの決定（progフィールドを優先）
