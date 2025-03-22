@@ -596,40 +596,67 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     const timestamps = new Set();
     const tagData = {};
     
-    // 各タグのデータを取得し、タイムスタンプを収集
-    for (const tagId of allTagIds) {
-      // gtagかどうかチェック
-      const isGtag = gtagIds.includes(tagId);
+  // 各タグのデータを取得し、タイムスタンプを収集
+  for (const tagId of allTagIds) {
+    // gtagかどうかチェック
+    const isGtag = gtagIds.includes(tagId);
+    
+    let data;
+    if (isGtag) {
+      // gtagの場合
+      const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
+      data = await getGtagData(gtag, { start, end });
       
-      let data;
-      if (isGtag) {
-        // gtagの場合
-        const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
-        data = await getGtagData(gtag, { start, end });
-      } else {
-        // 通常タグの場合
-        let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
-        const params = [tagId];
-        
-        if (start) {
-          query += ' AND timestamp >= ?';
-          params.push(new Date(start).toISOString());
+      // 修正2: gtagにも処理を適用（追加）
+      if (processing) {
+        const tagName = gtagIdToName.get(tagId);
+        if (tagName) {
+          const windowSize = window ? parseInt(window, 10) : null;
+          try {
+            switch (processing) {
+              case 'moving_average':
+                // データを移動平均で処理
+                data = calculateMovingAverage(data, windowSize || 5);
+                break;
+              case 'zscore':
+                // データをZスコアで処理
+                data = calculateZScore(data, windowSize);
+                break;
+              case 'deviation':
+                // データを偏差値で処理
+                data = calculateDeviation(data, windowSize);
+                break;
+            }
+          } catch (error) {
+            console.error(`CSVエクスポート: gTag ${tagName} の処理オプション適用中にエラーが発生しました: ${error.message}`);
+            // エラーでも処理を継続
+          }
         }
-        
-        if (end) {
-          query += ' AND timestamp <= ?';
-          params.push(new Date(end).toISOString());
-        }
-        
-        query += ' ORDER BY timestamp';
-        data = db.prepare(query).all(...params);
-        
-        // 処理オプションの適用
-        if (processing && !isGtag) {
-          const tagName = tagIdToName.get(tagId);
-          if (tagName) {
-            const windowSize = window ? parseInt(window, 10) : null;
-            const { executeProcess } = require('../utils/gtag-utils');
+      }
+    } else {
+      // 通常タグの場合
+      let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+      const params = [tagId];
+      
+      if (start) {
+        query += ' AND timestamp >= ?';
+        params.push(new Date(start).toISOString());
+      }
+      
+      if (end) {
+        query += ' AND timestamp <= ?';
+        params.push(new Date(end).toISOString());
+      }
+      
+      query += ' ORDER BY timestamp';
+      data = db.prepare(query).all(...params);
+      
+          // 処理オプションの適用
+          if (processing) {
+            const tagName = tagIdToName.get(tagId);
+            if (tagName) {
+              const windowSize = window ? parseInt(window, 10) : null;
+              const { executeProcess } = require('../utils/gtag-utils');
             
             try {
               switch (processing) {
@@ -673,10 +700,13 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
         data = getTimeShiftedData(data, true);
       }
       
-      // タグのデータを保存
+      // タグのデータを保存（修正）
       tagData[tagId] = {};
+      
+      // すべてのポイントをタイムスタンプ辞書に追加
       data.forEach(point => {
         timestamps.add(point.timestamp);
+        // 処理済みでも未処理でも同じく point.value を使用（これはすでに正しい値）
         tagData[tagId][point.timestamp] = point.value;
       });
     }
