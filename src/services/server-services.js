@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { db } = require('../db');
-const { importCsvToDatabase, importSpecificCsvFile } = require('../utils/csv-importer');
+const { importCsvToDatabase } = require('../utils/csv-importer');
 const { importTagMetadata, loadAndCacheMetadata } = require('../utils/tag-metadata-importer');
 const { 
   initializeGtagSystem, 
@@ -65,7 +65,7 @@ async function initializeServer() {
         for (const fileInfo of changedFiles) {
           console.log(`ファイル ${fileInfo.name} を処理中...（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
           try {
-            await importSpecificCsvFile(fileInfo);
+            await importCsvToDatabase(fileInfo);
             console.log(`ファイル ${fileInfo.name} の処理が完了しました`);
           } catch (importError) {
             console.error(`ファイル ${fileInfo.name} の処理中にエラーが発生しました:`, importError);
@@ -119,7 +119,7 @@ function setupFileWatchers() {
     detectChangedFiles, 
     detectChangedTranslationFiles 
   } = require('../utils/file-watcher');
-  const { importSpecificCsvFile } = require('../utils/csv-importer');
+  const { importCsvToDatabase } = require('../utils/csv-importer');
   
   // 1分おきにCSVフォルダを監視
   console.log(`CSVフォルダ監視を開始します (間隔: 1分)`);
@@ -133,7 +133,7 @@ function setupFileWatchers() {
         for (const fileInfo of changedFiles) {
           console.log(`ファイル ${fileInfo.name} の更新を処理します（チェックサム: ${fileInfo.checksum.substring(0, 8)}...）`);
           try {
-            await importSpecificCsvFile(fileInfo);
+            await importCsvToDatabase(fileInfo);
             console.log(`ファイル ${fileInfo.name} の更新処理が完了しました`);
           } catch (importError) {
             console.error(`ファイル ${fileInfo.name} の更新処理中にエラーが発生しました:`, importError);
