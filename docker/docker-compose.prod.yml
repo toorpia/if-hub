@@ -22,4 +22,5 @@ services:
       - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}
       - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
       - EXTERNAL_API_URL=https://external-system-url/api  # replace this with the external system's URL
+      - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
     restart: unless-stopped

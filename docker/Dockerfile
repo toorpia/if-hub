@@ -1,7 +1,7 @@
 FROM node:18-alpine
 
-# Pythonとデータ分析パッケージをインストール（apkパッケージを使用）
-RUN apk add --no-cache python3 \
+# タイムゾーンパッケージ、Pythonとデータ分析パッケージをインストール（apkパッケージを使用）
+RUN apk add --no-cache tzdata python3 \
     py3-numpy \
     py3-pandas \
     py3-scipy \
