@@ -19,5 +19,6 @@ services:
       - PORT=3000
       - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
       - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
+      - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
     restart: unless-stopped
     # rootとして実行するため、user設定を削除
