@@ -5,8 +5,11 @@ jspm_packages/
 # Production build outputs
 dist/
 build/
-db/
-db/file_checksums.json
+/db/
+/db/file_checksums.json
+
+# Explicitly include source code directories
+!src/db/
 
 # Generated data
 static_equipment_data/*.csv
