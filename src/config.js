@@ -15,7 +15,7 @@ module.exports = {
   
   // API設定
   api: {
-    maxRecordsPerRequest: parseInt(process.env.MAX_RECORDS_PER_REQUEST || '1000', 10), // 1リクエストあたりの最大レコード数
+    maxRecordsPerRequest: parseInt(process.env.MAX_RECORDS_PER_REQUEST || '100000', 10), // 1リクエストあたりの最大レコード数
   },
   
     // データソース設定

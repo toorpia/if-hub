@@ -230,6 +230,9 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
  */
 async function importCsvToDatabase(fileInfo) {
   console.log(`CSVファイル ${fileInfo.name} のインポートを開始します...`);
+  // インポート前にインデックスを削除（性能向上のため）
+  console.log(`  インポート前にインデックスを削除します...`);
+  db.exec('DROP INDEX IF EXISTS idx_tag_data_timestamp');
   
   try {
     const equipmentId = fileInfo.equipmentId;
@@ -458,6 +461,9 @@ async function importCsvToDatabase(fileInfo) {
       
       db.exec('COMMIT');
       console.log(`  ${fileInfo.name} の処理が完了しました（合計: ${tagCount}タグ, ${dataPointCount}データポイント）`);
+      // インポート後にインデックスを再作成
+      console.log(`  インポート完了後にインデックスを再作成します...`);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)');
       return { tagCount, dataPointCount };
     } catch (error) {
       db.exec('ROLLBACK');
