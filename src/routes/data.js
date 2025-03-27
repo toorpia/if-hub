@@ -547,8 +547,11 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     let headerNames = [...allTagIds]; // デフォルトはタグID
     
     if (shouldDisplay) {
-      // 通常タグのメタデータを取得
-      const metadataMap = getTagsMetadata(normalTagIds, {
+      // タグIDから内部タグ名（7th-untan.POW:7I1032.PV形式）のリストを作成
+      const normalTagNames = normalTagIds.map(id => tagIdToName.get(id)).filter(Boolean);
+      
+      // 内部タグ名からメタデータを取得（他のAPIエンドポイントと同様のアプローチ）
+      const metadataMap = getTagsMetadata(normalTagNames, {
         display: true,
         lang,
         showUnit: shouldShowUnit
@@ -574,13 +577,15 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
           return gtagHeaderMap[tagId] || tagId;
         } else {
           // 通常タグの場合
-          return metadataMap[tagId]?.display_name || tagId;
+          const tagName = tagIdToName.get(tagId);
+          return tagName ? metadataMap[tagName]?.display_name || tagId : tagId;
         }
       });
     }
     
     // CSVヘッダーの生成（1列目はdatetime、2列目以降は各タグの名前）
-    const headerValues = allTagIds.map(tagId => {
+    // 表示名オプションがオンの場合はheaderNamesを使用、それ以外はタグ名を使用
+    const headersToUse = shouldDisplay ? headerNames : allTagIds.map(tagId => {
       if (gtagIds.includes(tagId)) {
         // gtagの場合
         return gtagIdToName.get(tagId) || tagId.toString();
@@ -590,7 +595,7 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       }
     });
     
-    const csvHeader = ['datetime', ...headerValues].join(',');
+    const csvHeader = ['datetime', ...headersToUse].join(',');
     
     // データポイントのタイムスタンプを収集
     const timestamps = new Set();
