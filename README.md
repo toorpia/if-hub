@@ -328,6 +328,7 @@ Dockerコンテナを使用したデプロイメント設定が含まれます�
 - [運用マニュアル](docs/ja/operations_manual.md) - インストール、設定、運用の詳細
 - [APIマニュアル](docs/ja/api_manual.md) - APIエンドポイントの詳細と使用例
 - [開発者ガイド](docs/ja/developer_guide.md) - アーキテクチャ、コード詳細、拡張方法
+- [高次元時系列データのリサンプリング原則](docs/ja/timeseries_resampling_principles.md) - 時系列データの前処理と解析における理論的基礎
 
 ## データベースの選択と拡張性
 
