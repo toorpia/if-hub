@@ -41,8 +41,9 @@ export class CsvFormatter {
         return [];
       }
 
-      // 設備ごとのディレクトリを作成
-      const equipmentDir = path.join(this.config.directory, equipment);
+      // 出力ディレクトリを使用（設備名を追加しない）
+      const equipmentDir = this.config.directory;
+      console.log(`出力ディレクトリを使用: ${equipmentDir}`);
       await ensureDirectoryExists(equipmentDir);
 
       // データをソート

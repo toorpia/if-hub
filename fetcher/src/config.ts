@@ -67,7 +67,13 @@ export async function loadConfig(configPath: string = './config.yaml'): Promise<
  * @returns マージされた設定
  */
 function mergeWithDefaults(userConfig: Partial<FetcherConfig>): FetcherConfig {
-  return {
+  // ログを追加して設定値を確認
+  if (userConfig.output && userConfig.output.directory) {
+    console.log(`設定ファイルに指定された出力ディレクトリ: ${userConfig.output.directory}`);
+  }
+  
+  // マージ済み設定を作成
+  const mergedConfig = {
     equipment: userConfig.equipment || defaultConfig.equipment,
     output: {
       ...defaultConfig.output,
@@ -82,6 +88,11 @@ function mergeWithDefaults(userConfig: Partial<FetcherConfig>): FetcherConfig {
       ...userConfig.tag_validation
     }
   };
+  
+  // マージ後の値をログ出力
+  console.log(`マージ後の出力ディレクトリ: ${mergedConfig.output.directory}`);
+  
+  return mergedConfig;
 }
 
 /**
