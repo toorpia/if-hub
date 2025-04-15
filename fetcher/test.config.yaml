@@ -1,0 +1,49 @@
+# IF-HUB Fetcherテスト用設定ファイル
+
+# 設備一覧
+equipment:
+  # Pump01設備の設定
+  - name: Pump01
+    # 取得対象のタグ一覧
+    tags:
+      - Pump01.Flow
+      - Pump01.PowerConsumption
+      - Pump01.Temperature
+    # 条件定義
+    conditions:
+      # only_when: 特定の条件を満たす時間帯のみデータを抽出
+      only_when: []
+
+  # Tank01設備の設定
+  - name: Tank01
+    # 取得対象のタグ一覧
+    tags:
+      - Tank01.Level
+
+# 出力設定
+output:
+  # 出力フォーマット（csvのみサポート）
+  format: csv
+  # 出力ディレクトリ
+  directory: "data"
+  # テスト用に小さい値に設定
+  max_rows_per_file: 100
+  # ファイル名のタイムスタンプフォーマット
+  timestamp_format: "YYYYMMDD_HHmmss"
+
+# IF-HUB API設定
+if_hub_api:
+  # ローカルで実行中のIF-HUB APIのURL
+  base_url: "http://localhost:3001"
+  # 短いタイムアウト（テスト用）
+  timeout: 10000
+  # テスト用に小さい値に設定
+  max_records_per_request: 1000
+  page_size: 100
+
+# タグ整合性検証設定
+tag_validation:
+  # 有効/無効
+  enabled: true
+  # 存在しないタグがあればエラーで停止するか
+  stop_on_missing_tag: true

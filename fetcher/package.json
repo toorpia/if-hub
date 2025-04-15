@@ -1,0 +1,27 @@
+{
+  "name": "if-hub-fetcher",
+  "version": "0.1.0",
+  "description": "A data fetching orchestrator for IF-HUB",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "verify": "node fetch-and-verify.js",
+    "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.0.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.5",
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.3",
+    "@typescript-eslint/parser": "^6.7.3",
+    "eslint": "^8.50.0",
+    "typescript": "^5.2.2"
+  }
+}
