@@ -1,0 +1,35 @@
+{
+  "name": "if-hub-fetcher",
+  "version": "0.1.0",
+  "description": "A data fetching orchestrator for IF-HUB",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "test:all": "npm run test:unit && npm run test:integration",
+    "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.0.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/js-yaml": "^4.0.5",
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.3",
+    "@typescript-eslint/parser": "^6.7.3",
+    "eslint": "^8.50.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.2.2"
+  }
+}
