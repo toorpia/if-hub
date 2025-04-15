@@ -1,0 +1,54 @@
+# IF-HUB Fetcherモジュール設定ファイル
+# デフォルト設定ファイル
+
+# 設備一覧
+equipment:
+  # Pump01設備の設定
+  - name: Pump01
+    # 取得対象のタグ一覧
+    tags:
+      - Pump01.Flow
+      - Pump01.PowerConsumption
+      - Pump01.Temperature
+    # 条件定義
+    conditions:
+      # only_when: 特定の条件を満たす時間帯のみデータを抽出
+      only_when:
+        # 温度が45度以上の場合のみデータを抽出
+        - tag: Pump01.Temperature
+          condition: "> 45"
+
+  # Tank01設備の設定
+  - name: Tank01
+    # 取得対象のタグ一覧
+    tags:
+      - Tank01.Level
+
+# 出力設定
+output:
+  # 出力フォーマット（csvのみサポート）
+  format: csv
+  # 出力ディレクトリ
+  directory: "./data"
+  # 1ファイルあたりの最大行数（0=制限なし、デフォルト=100000）
+  max_rows_per_file: 100000
+  # ファイル名のタイムスタンプフォーマット
+  timestamp_format: "YYYYMMDD_HHmmss"
+
+# IF-HUB API設定
+if_hub_api:
+  # IF-HUBのAPIベースURL
+  base_url: "http://localhost:3001"
+  # タイムアウト（ミリ秒）
+  timeout: 30000
+  # 1リクエストでの最大レコード数
+  max_records_per_request: 10000
+  # ページングサイズ
+  page_size: 1000
+
+# タグ整合性検証設定
+tag_validation:
+  # 有効/無効
+  enabled: true
+  # 存在しないタグがあればエラーで停止するか
+  stop_on_missing_tag: true
