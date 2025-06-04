@@ -75,3 +75,6 @@ tag_metadata/*.csv
 !tag_metadata/.gitkeep
 plan.md
 cm.txt
+
+# working directory to export
+if-hub-export/
