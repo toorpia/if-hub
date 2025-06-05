@@ -971,6 +971,903 @@ app.get('/api/data/:tagId', (req, res) => {
 });
 ```
 
+## Fetcher/Ingester開発ガイド
+
+### Fetcherアーキテクチャ
+
+#### モジュール構成とディレクトリ構造
+
+Fetcherは以下のモジュラー構成で設計されています：
+
+```
+/fetcher/
+├── src/                      # ソースコード
+│   ├── types/                # TypeScript型定義
+│   │   ├── config.ts         # 設定ファイルの型定義
+│   │   ├── data.ts           # データ構造の型定義
+│   │   └── options.ts        # オプションの型定義
+│   ├── io/                   # I/O処理
+│   │   ├── file.ts           # ファイル操作
+│   │   └── http.ts           # HTTP通信
+│   ├── formatters/           # 出力フォーマッタ
+│   │   └── csv.ts            # CSV出力処理
+│   ├── config.ts             # 設定ファイル処理
+│   ├── api-client.ts         # APIクライアント
+│   ├── filter.ts             # フィルタリング
+│   ├── tag-validator.ts      # タグ検証
+│   ├── fetcher.ts            # コアロジック
+│   └── index.ts              # エクスポート定義
+├── cli/                      # CLIツール
+│   ├── index.ts              # エントリーポイント
+│   └── options-parser.ts     # オプション解析
+├── config.yaml               # デフォルト設定
+├── run.sh                    # 実行スクリプト
+└── README.md                 # ドキュメント
+```
+
+#### TypeScript実装の設計原則
+
+Fetcherは以下の設計原則に基づいて実装されています：
+
+**1. 責務の明確な分離**
+```typescript
+// 各モジュールが単一の責務を持つ
+export interface APIClient {
+  fetchTagData(tagId: string, options: FetchOptions): Promise<TagData>;
+  fetchBatchData(tags: string[], options: FetchOptions): Promise<BatchData>;
+}
+
+export interface DataFilter {
+  applyCondition(data: DataPoint[], condition: FilterCondition): DataPoint[];
+}
+
+export interface OutputFormatter {
+  formatToCSV(data: DataPoint[], metadata: TagMetadata[]): string;
+}
+```
+
+**2. Pure関数アプローチ**
+```typescript
+// 副作用を持たない純粋関数として実装
+export function filterDataByCondition(
+  data: DataPoint[], 
+  condition: string
+): DataPoint[] {
+  // 元のデータを変更せず、新しい配列を返す
+  return data.filter(point => evaluateCondition(point, condition));
+}
+
+export function formatTimestamp(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, '').slice(0, 15);
+}
+```
+
+**3. 型安全性の確保**
+```typescript
+// 厳密な型定義による実行時エラーの防止
+export interface FetchOptions {
+  start?: string;
+  end?: string;
+  latest?: boolean;
+  onlyWhen?: string;
+  maxRowsPerFile?: number;
+  pageSize?: number;
+}
+
+export interface FetchResult {
+  success: boolean;
+  stats?: {
+    totalRecords: number;
+    filteredRecords: number;
+    outputFiles: string[];
+  };
+  error?: Error;
+}
+```
+
+#### APIクライアント、フィルタリング、CSV出力の仕組み
+
+**APIクライアント実装：**
+```typescript
+// src/api-client.ts
+export class IFHubAPIClient implements APIClient {
+  private baseUrl: string;
+  private timeout: number;
+
+  async fetchTagData(tagId: string, options: FetchOptions): Promise<TagData> {
+    const url = this.buildUrl(`/api/data/${tagId}`, options);
+    
+    try {
+      const response = await axios.get(url, {
+        timeout: this.timeout,
+        validateStatus: (status) => status < 500
+      });
+      
+      if (response.status === 404) {
+        throw new TagNotFoundError(`Tag ${tagId} not found`);
+      }
+      
+      return this.parseTagData(response.data);
+    } catch (error) {
+      throw new APIError(`Failed to fetch data for ${tagId}`, error);
+    }
+  }
+
+  async fetchBatchData(tags: string[], options: FetchOptions): Promise<BatchData> {
+    const chunkedTags = this.chunkArray(tags, options.pageSize || 10);
+    const results: BatchData = {};
+    
+    for (const chunk of chunkedTags) {
+      const chunkData = await this.fetchTagChunk(chunk, options);
+      Object.assign(results, chunkData);
+    }
+    
+    return results;
+  }
+}
+```
+
+**フィルタリング実装：**
+```typescript
+// src/filter.ts
+export class DataFilter {
+  applyCondition(data: DataPoint[], condition: string): DataPoint[] {
+    const conditionEvaluator = this.parseCondition(condition);
+    
+    return data.filter(point => {
+      try {
+        return conditionEvaluator.evaluate(point);
+      } catch (error) {
+        console.warn(`Condition evaluation failed for point at ${point.timestamp}:`, error);
+        return false;
+      }
+    });
+  }
+
+  private parseCondition(condition: string): ConditionEvaluator {
+    // 条件式をパースして評価可能な形に変換
+    const parsed = this.conditionParser.parse(condition);
+    return new ConditionEvaluator(parsed);
+  }
+}
+
+export class ConditionEvaluator {
+  constructor(private expression: ParsedExpression) {}
+
+  evaluate(context: Record<string, any>): boolean {
+    return this.evaluateExpression(this.expression, context);
+  }
+
+  private evaluateExpression(expr: ParsedExpression, context: Record<string, any>): boolean {
+    switch (expr.type) {
+      case 'comparison':
+        return this.evaluateComparison(expr, context);
+      case 'logical':
+        return this.evaluateLogical(expr, context);
+      default:
+        throw new Error(`Unknown expression type: ${expr.type}`);
+    }
+  }
+}
+```
+
+**CSV出力実装：**
+```typescript
+// src/formatters/csv.ts
+export class CSVFormatter implements OutputFormatter {
+  formatToCSV(data: DataPoint[], metadata: TagMetadata[]): string {
+    const headers = this.buildHeaders(metadata);
+    const rows = this.buildRows(data, metadata);
+    
+    return [headers, ...rows].join('\n');
+  }
+
+  private buildHeaders(metadata: TagMetadata[]): string {
+    const columns = ['datetime', ...metadata.map(meta => meta.displayName || meta.id)];
+    return this.escapeCsvRow(columns);
+  }
+
+  private buildRows(data: DataPoint[], metadata: TagMetadata[]): string[] {
+    const groupedData = this.groupByTimestamp(data);
+    
+    return Object.entries(groupedData)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([timestamp, points]) => {
+        const row = [timestamp];
+        
+        metadata.forEach(meta => {
+          const point = points.find(p => p.tagId === meta.id);
+          row.push(point ? String(point.value) : '');
+        });
+        
+        return this.escapeCsvRow(row);
+      });
+  }
+
+  private escapeCsvRow(values: string[]): string {
+    return values
+      .map(value => {
+        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      })
+      .join(',');
+  }
+}
+```
+
+#### 拡張方法（新しい条件式、出力フォーマット）
+
+**新しい条件式の追加：**
+```typescript
+// src/filter.ts に新しい演算子を追加
+export class ConditionParser {
+  private operators = {
+    '>': (a: number, b: number) => a > b,
+    '<': (a: number, b: number) => a < b,
+    '>=': (a: number, b: number) => a >= b,
+    '<=': (a: number, b: number) => a <= b,
+    '==': (a: any, b: any) => a == b,
+    '!=': (a: any, b: any) => a != b,
+    // 新しい演算子を追加
+    'between': (a: number, min: number, max: number) => a >= min && a <= max,
+    'in': (a: any, values: any[]) => values.includes(a),
+    'regex': (a: string, pattern: string) => new RegExp(pattern).test(a)
+  };
+
+  parse(condition: string): ParsedExpression {
+    // 新しい構文をサポート
+    // 例: "Temperature between 50 and 80"
+    // 例: "Status in ['running', 'idle']"
+    // 例: "Message regex '^ERROR.*'"
+    
+    if (condition.includes(' between ')) {
+      return this.parseBetweenCondition(condition);
+    }
+    
+    if (condition.includes(' in ')) {
+      return this.parseInCondition(condition);
+    }
+    
+    if (condition.includes(' regex ')) {
+      return this.parseRegexCondition(condition);
+    }
+    
+    return this.parseStandardCondition(condition);
+  }
+}
+```
+
+**新しい出力フォーマットの追加：**
+```typescript
+// src/formatters/json.ts
+export class JSONFormatter implements OutputFormatter {
+  formatToJSON(data: DataPoint[], metadata: TagMetadata[]): string {
+    const formatted = {
+      metadata: {
+        tags: metadata,
+        exportTime: new Date().toISOString(),
+        recordCount: data.length
+      },
+      data: this.groupByTimestamp(data)
+    };
+    
+    return JSON.stringify(formatted, null, 2);
+  }
+}
+
+// src/formatters/parquet.ts
+export class ParquetFormatter implements OutputFormatter {
+  async formatToParquet(data: DataPoint[], metadata: TagMetadata[]): Promise<Buffer> {
+    const schema = this.buildParquetSchema(metadata);
+    const records = this.convertToRecords(data, metadata);
+    
+    return await this.writeParquetFile(schema, records);
+  }
+}
+
+// src/formatters/factory.ts
+export class FormatterFactory {
+  static create(format: string): OutputFormatter {
+    switch (format.toLowerCase()) {
+      case 'csv':
+        return new CSVFormatter();
+      case 'json':
+        return new JSONFormatter();
+      case 'parquet':
+        return new ParquetFormatter();
+      default:
+        throw new Error(`Unsupported format: ${format}`);
+    }
+  }
+}
+```
+
+### Ingesterアーキテクチャ
+
+#### Node.js/TypeScriptベースの実装
+
+Ingesterは以下の構造で実装されています：
+
+```
+ingester/
+├── src/
+│   ├── types/           # TypeScript型定義
+│   │   ├── config.ts    # 設定の型定義
+│   │   └── state.ts     # 状態管理の型定義
+│   ├── services/        # サービスクラス
+│   │   ├── config-loader.ts     # 設定ファイル読み込み
+│   │   ├── csv-output.ts        # CSV出力サービス
+│   │   ├── pi-api-client.ts     # PI-API通信
+│   │   ├── state-manager.ts     # 状態管理
+│   │   └── tag-metadata.ts      # メタデータ処理
+│   ├── scheduler.ts     # スケジューラー
+│   └── index.ts         # エントリポイント
+├── Dockerfile          # Dockerイメージ定義
+└── package.json        # NPM設定
+```
+
+#### PI-API連携の仕組み
+
+**PI-APIクライアント実装：**
+```typescript
+// src/services/pi-api-client.ts
+export class PIApiClient {
+  private baseUrl: string;
+  private timeout: number;
+  private maxRetries: number;
+
+  async fetchTimeSeriesData(
+    tagNames: string[], 
+    startDate: Date, 
+    endDate: Date
+  ): Promise<PITimeSeriesData> {
+    const formattedStart = this.formatPIDate(startDate);
+    const formattedEnd = this.formatPIDate(endDate);
+    
+    const url = `${this.baseUrl}/PIData?TagNames=${tagNames.join(',')}&StartDate=${formattedStart}&EndDate=${formattedEnd}`;
+    
+    return await this.executeWithRetry(async () => {
+      const response = await axios.get(url, {
+        timeout: this.timeout,
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      return this.parsePIResponse(response.data);
+    });
+  }
+
+  async fetchTagMetadata(tagNames: string[]): Promise<PITagMetadata[]> {
+    const url = `${this.baseUrl}/TagAttributes?TagNames=${tagNames.join(',')}`;
+    
+    const response = await this.executeWithRetry(async () => {
+      return await axios.get(url, { timeout: this.timeout });
+    });
+    
+    return this.parseMetadataResponse(response.data);
+  }
+
+  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: Error;
+    
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        
+        if (attempt < this.maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          await this.sleep(delay);
+          console.warn(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+        }
+      }
+    }
+    
+    throw new PIApiError(`Failed after ${this.maxRetries} attempts`, lastError);
+  }
+}
+```
+
+#### スケジューラーと状態管理
+
+**スケジューラー実装：**
+```typescript
+// src/scheduler.ts
+export class DataIngestionScheduler {
+  private jobs: Map<string, cron.ScheduledTask> = new Map();
+  private stateManager: StateManager;
+  private configLoader: ConfigLoader;
+
+  async initialize(): Promise<void> {
+    const equipmentConfigs = await this.configLoader.loadAllEquipmentConfigs();
+    
+    for (const config of equipmentConfigs) {
+      if (config.pi_integration?.enabled) {
+        await this.scheduleEquipment(config);
+      }
+    }
+  }
+
+  private async scheduleEquipment(config: EquipmentConfig): Promise<void> {
+    const interval = config.basemap.addplot.interval;
+    const cronExpression = this.convertIntervalToCron(interval);
+    
+    const job = cron.schedule(cronExpression, async () => {
+      try {
+        await this.executeDataIngestion(config);
+      } catch (error) {
+        console.error(`Data ingestion failed for ${config.name}:`, error);
+        await this.stateManager.incrementErrorCount(config.name);
+      }
+    }, {
+      scheduled: false, // Don't start automatically
+      timezone: 'Asia/Tokyo'
+    });
+    
+    this.jobs.set(config.name, job);
+    job.start();
+    
+    console.log(`Scheduled data ingestion for ${config.name} with interval ${interval}`);
+  }
+
+  private async executeDataIngestion(config: EquipmentConfig): Promise<void> {
+    const state = await this.stateManager.getEquipmentState(config.name);
+    const now = new Date();
+    
+    // 前回取得時刻から増分データを取得
+    const startTime = state?.lastFetchTime 
+      ? new Date(state.lastFetchTime)
+      : this.calculateInitialStartTime(config, now);
+    
+    const endTime = new Date(now.getTime() - 30000); // 30秒のマージンを設ける
+    
+    if (startTime >= endTime) {
+      console.log(`No new data available for ${config.name}`);
+      return;
+    }
+    
+    // PI-APIからデータを取得
+    const piData = await this.piApiClient.fetchTimeSeriesData(
+      config.basemap.source_tags,
+      startTime,
+      endTime
+    );
+    
+    // CSV形式に変換して出力
+    await this.csvOutputService.writeEquipmentData(config, piData);
+    
+    // 状態を更新
+    await this.stateManager.updateEquipmentState(config.name, {
+      lastFetchTime: endTime.toISOString(),
+      lastSuccessTime: now.toISOString(),
+      errorCount: 0
+    });
+    
+    console.log(`Data ingestion completed for ${config.name}: ${piData.length} records`);
+  }
+}
+```
+
+**状態管理実装：**
+```typescript
+// src/services/state-manager.ts
+export class StateManager {
+  private statePath: string;
+  private state: IngesterState;
+
+  async loadState(): Promise<void> {
+    try {
+      if (await fs.pathExists(this.statePath)) {
+        const stateData = await fs.readJson(this.statePath);
+        this.state = this.validateState(stateData);
+      } else {
+        this.state = this.createInitialState();
+      }
+    } catch (error) {
+      console.warn('Failed to load state, using initial state:', error);
+      this.state = this.createInitialState();
+    }
+  }
+
+  async saveState(): Promise<void> {
+    this.state.lastUpdated = new Date().toISOString();
+    
+    await fs.ensureDir(path.dirname(this.statePath));
+    await fs.writeJson(this.statePath, this.state, { spaces: 2 });
+  }
+
+  async getEquipmentState(equipmentName: string): Promise<EquipmentState | null> {
+    return this.state.equipment[equipmentName] || null;
+  }
+
+  async updateEquipmentState(equipmentName: string, update: Partial<EquipmentState>): Promise<void> {
+    if (!this.state.equipment[equipmentName]) {
+      this.state.equipment[equipmentName] = {
+        lastFetchTime: null,
+        lastSuccessTime: null,
+        errorCount: 0
+      };
+    }
+    
+    Object.assign(this.state.equipment[equipmentName], update);
+    await this.saveState();
+  }
+
+  async incrementErrorCount(equipmentName: string): Promise<void> {
+    const currentState = await this.getEquipmentState(equipmentName);
+    const errorCount = (currentState?.errorCount || 0) + 1;
+    
+    await this.updateEquipmentState(equipmentName, { errorCount });
+  }
+}
+```
+
+#### Docker化とCI/CD対応
+
+**Dockerfile：**
+```dockerfile
+# ingester/Dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# 依存関係のインストール
+COPY package*.json ./
+RUN npm ci --only=production
+
+# ソースコードのコピーとビルド
+COPY . .
+RUN npm run build
+
+# 実行用の軽量イメージ
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# 必要なファイルのみをコピー
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+# ヘルスチェック用のスクリプト
+COPY healthcheck.js ./
+
+# 非rootユーザーでの実行
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S ingester -u 1001
+USER ingester
+
+# ヘルスチェックの設定
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node healthcheck.js
+
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
+```
+
+**GitHub Actions CI/CD：**
+```yaml
+# .github/workflows/ingester.yml
+name: Ingester CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['ingester/**']
+  pull_request:
+    branches: [main]
+    paths: ['ingester/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: ingester/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ingester
+      run: npm ci
+    
+    - name: Run type check
+      working-directory: ingester
+      run: npm run type-check
+    
+    - name: Run linting
+      working-directory: ingester
+      run: npm run lint
+    
+    - name: Run tests
+      working-directory: ingester
+      run: npm test
+    
+    - name: Build
+      working-directory: ingester
+      run: npm run build
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./ingester
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}/if-hub-ingester:latest
+          ghcr.io/${{ github.repository }}/if-hub-ingester:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+```
+
+### 開発環境セットアップ
+
+#### 依存関係とビルド方法
+
+**Fetcherの開発環境：**
+```bash
+# Fetcherディレクトリに移動
+cd fetcher
+
+# 依存関係のインストール
+npm install
+
+# 開発用の依存関係（型チェック、リンター等）
+npm install --save-dev @types/node typescript ts-node jest @types/jest eslint
+
+# TypeScriptの設定
+cat > tsconfig.json << EOF
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*", "cli/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}
+EOF
+
+# ビルド
+npm run build
+
+# 開発モード（ファイル監視付き）
+npm run dev
+
+# テスト実行
+npm test
+
+# リンター実行
+npm run lint
+```
+
+**Ingesterの開発環境：**
+```bash
+# Ingesterディレクトリに移動
+cd ingester
+
+# 依存関係のインストール
+npm install
+
+# 開発用の依存関係
+npm install --save-dev @types/node @types/node-cron typescript ts-node nodemon jest @types/jest
+
+# package.jsonのスクリプト設定
+cat > package.json << EOF
+{
+  "name": "if-hub-ingester",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.0"
+  }
+}
+EOF
+
+# 開発モード
+npm run dev
+
+# ビルド
+npm run build
+
+# テスト
+npm test
+```
+
+#### テスト実行方法
+
+**Fetcherのテスト：**
+```typescript
+// fetcher/tests/fetcher.test.ts
+import { FetcherCore } from '../src/fetcher';
+import { MockAPIClient } from './mocks/api-client';
+
+describe('FetcherCore', () => {
+  let fetcher: FetcherCore;
+  let mockClient: MockAPIClient;
+
+  beforeEach(() => {
+    mockClient = new MockAPIClient();
+    fetcher = new FetcherCore(mockClient);
+  });
+
+  test('should fetch basic tag data', async () => {
+    // Mock data setup
+    mockClient.mockTagData('Pump01.Temperature', [
+      { timestamp: '2023-01-01T00:00:00Z', value: 75.2 },
+      { timestamp: '2023-01-01T00:10:00Z', value: 76.1 }
+    ]);
+
+    const result = await fetcher.fetchEquipmentData('Pump01', {
+      tags: ['Pump01.Temperature']
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.stats?.totalRecords).toBe(2);
+  });
+
+  test('should apply condition filtering', async () => {
+    // Test condition-based filtering
+    mockClient.mockTagData('Pump01.Temperature', [
+      { timestamp: '2023-01-01T00:00:00Z', value: 45.0 },
+      { timestamp: '2023-01-01T00:10:00Z', value: 55.0 },
+      { timestamp: '2023-01-01T00:20:00Z', value: 48.0 }
+    ]);
+
+    const result = await fetcher.fetchEquipmentData('Pump01', {
+      tags: ['Pump01.Temperature'],
+      onlyWhen: 'Pump01.Temperature > 50'
+    });
+
+    expect(result.stats?.filteredRecords).toBe(1);
+  });
+});
+```
+
+**Ingesterのテスト：**
+```typescript
+// ingester/tests/pi-api-client.test.ts
+import { PIApiClient } from '../src/services/pi-api-client';
+import nock from 'nock';
+
+describe('PIApiClient', () => {
+  let client: PIApiClient;
+
+  beforeEach(() => {
+    client = new PIApiClient({
+      host: 'test-pi-server',
+      port: 3011,
+      timeout: 5000,
+      maxRetries: 2
+    });
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+  });
+
+  test('should fetch time series data successfully', async () => {
+    const mockResponse = [
+      {
+        TagName: 'POW:711034.PV',
+        TimeStamp: '2023-01-01T00:00:00Z',
+        Value: 123.45,
+        Quality: 'Good'
+      }
+    ];
+
+    nock('http://test-pi-server:3011')
+      .get('/PIData')
+      .query(true)
+      .reply(200, mockResponse);
+
+    const result = await client.fetchTimeSeriesData(
+      ['POW:711034.PV'],
+      new Date('2023-01-01T00:00:00Z'),
+      new Date('2023-01-01T01:00:00Z')
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tagName).toBe('POW:711034.PV');
+    expect(result[0].value).toBe(123.45);
+  });
+
+  test('should retry on network errors', async () => {
+    nock('http://test-pi-server:3011')
+      .get('/PIData')
+      .query(true)
+      .replyWithError('Network error')
+      .get('/PIData')
+      .query(true)
+      .reply(200, []);
+
+    const result = await client.fetchTimeSeriesData(
+      ['POW:711034.PV'],
+      new Date('2023-01-01T00:00:00Z'),
+      new Date('2023-01-01T01:00:00Z')
+    );
+
+    expect(result).toEqual([]);
+  });
+});
+```
+
+#### デバッグとトラブルシューティング
+
+**Fetcherのデバッグ：**
+```typescript
+// デバッグモードでの実行
+DEBUG=fetcher:* npm run dev
+
+// 詳細ログの有効化
+export FETCHER_LOG_LEVEL=debug
+./run.sh --equipment Pump01 --verbose
+
+// エラーの詳細確認
+./run.sh --equipment Pump01 --tags NonExistentTag 2>&1 | tee debug.log
+```
+
+**Ingesterのデバッグ：**
+```bash
+# ログレベルの設定
+export LOG_LEVEL=debug
+npm run dev
+
+# Docker環境でのデバッグ
+docker logs -f if-hub-pi-ingester
+
+# 状態ファイルの確認
+cat logs/ingester-state.json | jq .
+
+# PI-API接続テスト
+curl "http://pi-server:3011/PIData?TagNames=TEST&StartDate=20230101000000&EndDate=20230101010000"
+```
+
 ## テスト方法
 
 ### 単体テスト

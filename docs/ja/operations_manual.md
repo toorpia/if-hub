@@ -409,6 +409,266 @@ gtagは統合APIを通じて簡単にアクセスできます：
    GET /api/export/equipment/:equipmentId/csv
    ```
 
+## Fetcher/Ingester運用管理
+
+### Fetcherの運用
+
+#### 概要と目的
+
+IF-HUB Fetcherは、IF-HUBからのデータ抽出・整形・条件フィルタリングを行うフロントエンド機構です。設備単位・条件付きでのタグ/gtagデータ抽出機構を提供し、CSV形式でデータを保存します。
+
+主な機能：
+- 通常のタグ/gtagの取得機能
+- 条件付きデータ取得（`only_when`構文）
+- 設定ファイルによる柔軟な制御
+- 増分データ取得機能（`--latest`オプション）
+- 大量データの自動ファイル分割（デフォルト: 10万行ごと）
+- タイムスタンプベースのファイル命名
+
+#### インストールと設定
+
+```bash
+# Fetcherディレクトリに移動
+cd fetcher
+
+# 依存パッケージのインストール
+npm install
+
+# TypeScriptのビルド
+npm run build
+```
+
+#### 基本的な実行方法
+
+```bash
+# 設備のデータを取得
+./run.sh --equipment Pump01
+
+# 特定のタグのみ取得
+./run.sh --equipment Pump01 --tags Pump01.Temperature,Pump01.Pressure
+
+# 期間指定
+./run.sh --equipment Pump01 --start "2023-01-01T00:00:00Z" --end "2023-01-31T23:59:59Z"
+
+# 最新データのみ取得（前回の最終時刻以降）
+./run.sh --equipment Pump01 --latest
+
+# 条件付き取得（温度が50度より大きい場合のみ）
+./run.sh --equipment Pump01 --only-when "Pump01.Temperature > 50"
+```
+
+#### 設定ファイル管理
+
+設定ファイル（`./fetcher/config.yaml`）でデフォルト設定を行います：
+
+```yaml
+# 設備一覧
+equipment:
+  - name: Pump01
+    # 取得対象のタグ一覧
+    tags:
+      - Pump01.Flow
+      - Pump01.Temperature
+    # 条件定義
+    conditions:
+      # only_when: 特定の条件を満たす時間帯のみデータを抽出
+      only_when:
+        - tag: Pump01.Temperature
+          condition: "> 45"
+
+# 出力設定
+output:
+  format: csv
+  directory: "./data"
+  max_rows_per_file: 100000
+
+# IF-HUB API設定
+if_hub_api:
+  base_url: "http://localhost:3001"
+  timeout: 30000
+  max_records_per_request: 10000
+  page_size: 1000
+```
+
+#### 出力ファイル管理
+
+データは指定した出力ディレクトリの下に設備ごとのサブディレクトリに保存されます：
+
+```
+data/
+  ├── Pump01/
+  │   ├── Pump01_20230101_000000-20230105_235959.csv
+  │   └── Pump01_20230106_000000-20230110_120535.csv
+  └── Tank01/
+      └── Tank01_20230101_000000-20230110_235959.csv
+```
+
+#### Fetcherのトラブルシューティング
+
+**接続エラーが発生する場合：**
+1. IF-HUBサーバーが起動しているか確認
+2. `config.yaml`の`base_url`設定を確認
+3. ネットワーク接続を確認
+
+**設定エラーが発生する場合：**
+1. YAML構文エラーがないか確認
+2. 指定したタグIDが正しいか確認
+3. 条件式の構文が正しいか確認
+
+**出力エラーが発生する場合：**
+1. 出力ディレクトリの書き込み権限を確認
+2. ディスク容量を確認
+3. ファイル分割設定を見直し
+
+### Ingesterの運用
+
+#### 概要と目的
+
+IF-HUB PI Data Ingesterは、PI SystemからのプロセスデータをIF-HUBの静的設備データとして取り込むためのデータ取得モジュールです。PI System（OSIsoft PI）からプロセスデータを定期的に取得し、IF-HUBで利用可能なCSV形式で出力します。
+
+主な機能：
+- 自動スケジュール実行（設備ごとに設定された間隔でデータを自動取得）
+- 増分データ取得（前回取得時刻から継続してデータを取得）
+- 設定ファイルベース（YAML形式の設定ファイルによる柔軟な設定）
+- 堅牢性（リトライ機能、エラーハンドリング、状態管理）
+- Docker対応（コンテナ化による簡単なデプロイメント）
+- CSV自動変換（PI-APIからの生データをIF-HUB形式に自動変換）
+- メタデータ抽出（タグの表示名と単位を自動抽出）
+
+#### Docker環境での運用
+
+**前提条件：**
+- Docker & Docker Compose
+- PI API Server（PI Systemへのアクセス）
+
+**コンテナ実行：**
+```bash
+# イメージをビルド
+docker build -t if-hub-pi-ingester ./ingester
+
+# コンテナを実行
+docker run -d \
+  --name pi-ingester \
+  -v $(pwd)/configs:/app/configs:ro \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/static_equipment_data:/app/static_equipment_data \
+  if-hub-pi-ingester
+```
+
+**Docker Compose（推奨）：**
+```yaml
+version: '3.8'
+services:
+  pi-ingester:
+    build: ./ingester
+    container_name: if-hub-pi-ingester
+    restart: unless-stopped
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+      - ./static_equipment_data:/app/static_equipment_data
+    environment:
+      - TZ=Asia/Tokyo
+    depends_on:
+      - if-hub
+```
+
+#### 設定ファイル管理
+
+**共通設定（`configs/common.yaml`）：**
+```yaml
+pi_api:
+  host: "127.0.0.1"
+  port: 3011
+  timeout: 30000
+  max_retries: 3
+  retry_interval: 5000
+
+logging:
+  level: "info"
+  file: "/app/logs/ingester.log"
+
+data_acquisition:
+  fetch_margin_seconds: 30
+  max_history_days: 30
+```
+
+**設備設定（`configs/equipments/{設備名}/{設定名}.yaml`）：**
+```yaml
+basemap:
+  addplot:
+    interval: "10m"
+    lookback_period: "10D"
+
+  source_tags:
+    - "POW:711034.PV"
+    - "POW:7T105B1.PV"
+
+pi_integration:
+  enabled: true
+  output_filename: "7th-untan.csv"
+```
+
+#### ログ監視とヘルスチェック
+
+**状態ファイルの確認：**
+取得状態は`/app/logs/ingester-state.json`に保存されます：
+
+```json
+{
+  "equipment": {
+    "7th-untan/short-term": {
+      "lastFetchTime": "2025-06-04T03:00:00.000Z",
+      "lastSuccessTime": "2025-06-04T03:00:00.000Z",
+      "errorCount": 0
+    }
+  },
+  "lastUpdated": "2025-06-04T03:00:30.123Z"
+}
+```
+
+**ログの確認：**
+```bash
+# リアルタイムログ
+docker logs -f if-hub-pi-ingester
+
+# 状態ファイルの確認
+cat logs/ingester-state.json | jq .
+```
+
+**ヘルスチェック：**
+```bash
+# ヘルスチェック状況を確認
+docker ps
+
+# コンテナの詳細状態
+docker inspect if-hub-pi-ingester
+```
+
+#### Ingesterのトラブルシューティング
+
+**PI-API-Serverに接続できない場合：**
+1. `configs/common.yaml`のホスト・ポート設定を確認
+2. PI-API-Serverが起動しているか確認
+3. ネットワーク接続を確認
+4. 接続テスト：
+   ```bash
+   curl "http://10.255.234.21:3011/PIData?TagNames=TEST:TAG&StartDate=20250604000000&EndDate=20250604010000"
+   ```
+
+**設定ファイルが見つからない場合：**
+1. 設定ファイルのパスと名前を確認
+2. `pi_integration.enabled: true`が設定されているか確認
+3. YAML構文チェック：
+   ```bash
+   cat configs/common.yaml | python -c "import yaml; import sys; yaml.safe_load(sys.stdin)"
+   ```
+
+**出力ディレクトリに書き込めない場合：**
+1. ディレクトリの権限を確認
+2. Dockerボリュームマウントを確認
+3. ディスク容量を確認
+
 ## メンテナンス
 
 ### ログ管理
