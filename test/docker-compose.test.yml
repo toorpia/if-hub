@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # モックPI-APIサーバー
+  mock-pi-api:
+    build:
+      context: ./mock-pi-api
+      dockerfile: Dockerfile
+    container_name: mock-pi-api-test
+    ports:
+      - "3011:3011"
+    environment:
+      - TZ=Asia/Tokyo
+    networks:
+      - pi-test-network
+
+  # PI-Ingesterテスト
+  pi-ingester-test:
+    build:
+      context: ../ingester
+      dockerfile: Dockerfile
+    container_name: pi-ingester-test
+    user: "0:0"  # root権限で実行してボリューム書き込み問題を回避
+    volumes:
+      - ./configs:/app/configs:ro         # テスト設定
+      - ./logs:/app/logs                  # テストログ
+      - ./output:/app/static_equipment_data  # テスト出力
+    environment:
+      - TZ=Asia/Tokyo
+      - NODE_ENV=test
+      # PI-Ingesterの設定パス
+      - CONFIG_BASE_PATH=/app/configs
+      - STATE_FILE_PATH=/app/logs/ingester-state.json
+      - OUTPUT_BASE_PATH=/app/static_equipment_data
+      # ログ設定
+      - LOG_LEVEL=debug
+    depends_on:
+      - mock-pi-api
+    networks:
+      - pi-test-network
+    restart: unless-stopped
+
+networks:
+  pi-test-network:
+    driver: bridge
