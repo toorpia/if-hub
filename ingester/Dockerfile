@@ -25,10 +25,10 @@ RUN npm run build
 RUN npm ci --only=production && npm cache clean --force
 
 # 必要なディレクトリを作成
-RUN mkdir -p /app/logs /app/static_equipment_data
+RUN mkdir -p /app/logs /app/static_equipment_data /app/tag_metadata
 
-# ログディレクトリの権限を設定
-RUN chmod 755 /app/logs /app/static_equipment_data
+# ディレクトリの権限を設定
+RUN chmod 755 /app/logs /app/static_equipment_data /app/tag_metadata
 
 # 非rootユーザーを作成
 RUN addgroup -g 1001 -S nodejs && \

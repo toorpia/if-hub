@@ -1,12 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { TagMetadataService, TagMetadata } from './tag-metadata';
 
 export class CSVOutputService {
   private outputBasePath: string;
+  private tagMetadataService: TagMetadataService;
 
   constructor(outputBasePath?: string) {
     // 環境変数から出力パスを取得、デフォルトは '/app/static_equipment_data'
     this.outputBasePath = outputBasePath || process.env.OUTPUT_BASE_PATH || '/app/static_equipment_data';
+    this.tagMetadataService = new TagMetadataService();
     
     console.log(`📁 CSV output path: ${this.outputBasePath}`);
   }
@@ -146,6 +149,108 @@ export class CSVOutputService {
     } catch (error) {
       console.warn(`Failed to read last timestamp from ${outputPath}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * PI-APIから取得した生データを処理してIF-HUB形式に変換し、メタデータを更新
+   */
+  async processAndWriteRawCSV(filename: string, rawCSVData: string): Promise<{ 
+    success: boolean; 
+    processedLineCount?: number;
+    extractedMetadataCount?: number;
+    error?: string;
+  }> {
+    try {
+      console.log(`Processing raw CSV data for ${filename}...`);
+
+      // メタデータディレクトリの確認
+      const metadataInfo = this.tagMetadataService.getMetadataDirectoryInfo();
+      console.log(`Metadata directory: ${metadataInfo.path} (exists: ${metadataInfo.exists}, writable: ${metadataInfo.writable})`);
+      
+      if (!metadataInfo.writable) {
+        console.warn(`Metadata directory is not writable: ${metadataInfo.path}. Skipping metadata extraction.`);
+      }
+
+      // 1. メタデータを抽出（2行目と3行目から）
+      let extractedMetadataCount = 0;
+      if (metadataInfo.writable) {
+        try {
+          const metadata = this.tagMetadataService.extractMetadataFromCSV(rawCSVData);
+          extractedMetadataCount = metadata.length;
+          
+          if (metadata.length > 0) {
+            // translationsファイルを更新
+            await this.tagMetadataService.updateTranslationsFile(metadata, 'ja');
+            console.log(`✅ Updated translations file with ${extractedMetadataCount} metadata entries`);
+          }
+        } catch (metadataError) {
+          console.warn(`Failed to extract/update metadata: ${metadataError}`);
+          // メタデータの処理に失敗してもCSV処理は続行
+        }
+      }
+
+      // 2. CSVデータをIF-HUB形式に変換（2行目と3行目を削除）
+      const processedCSV = this.tagMetadataService.processRawCSVToIFHubFormat(rawCSVData);
+
+      // 3. 変換後のCSVを検証
+      const validation = this.validateProcessedCSV(processedCSV);
+      if (!validation.valid) {
+        throw new Error(`Invalid processed CSV data: ${validation.error}`);
+      }
+
+      // 4. ファイルに書き込み
+      await this.writeCSVFile(filename, processedCSV);
+
+      console.log(`✅ Successfully processed ${filename}: ${validation.lineCount} lines, ${extractedMetadataCount} metadata entries`);
+
+      return {
+        success: true,
+        processedLineCount: validation.lineCount,
+        extractedMetadataCount,
+      };
+
+    } catch (error: any) {
+      const errorMessage = error.message || 'Unknown processing error';
+      console.error(`❌ Failed to process raw CSV for ${filename}: ${errorMessage}`);
+      
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * 処理済みCSVデータの検証（IF-HUB形式用）
+   */
+  private validateProcessedCSV(csvData: string): { valid: boolean; error?: string; lineCount: number } {
+    try {
+      const lines = csvData.split('\n').filter(line => line.trim().length > 0);
+      
+      if (lines.length === 0) {
+        return { valid: false, error: 'Empty CSV data', lineCount: 0 };
+      }
+
+      if (lines.length < 2) {
+        return { valid: false, error: 'CSV must contain at least header and one data row', lineCount: lines.length };
+      }
+
+      // ヘッダー行があることを確認
+      const headerLine = lines[0];
+      if (!headerLine.includes(',')) {
+        return { valid: false, error: 'Invalid CSV header format', lineCount: lines.length };
+      }
+
+      // datetime/timestampカラムが含まれているかチェック
+      const headers = headerLine.split(',').map(h => h.trim().toLowerCase());
+      if (!headers.includes('datetime') && !headers.includes('timestamp')) {
+        return { valid: false, error: 'Missing datetime/timestamp column', lineCount: lines.length };
+      }
+
+      return { valid: true, lineCount: lines.length };
+    } catch (error) {
+      return { valid: false, error: `CSV validation error: ${error}`, lineCount: 0 };
     }
   }
 
