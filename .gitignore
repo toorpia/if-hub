@@ -78,3 +78,5 @@ cm.txt
 
 # working directory to export
 if-hub-export/
+
+test/output/

@@ -1,0 +1,10 @@
+# PI Batch Ingester - Python標準ライブラリのみ使用
+# Ubuntu 22.04 LTS環境で外部ライブラリなしで動作します
+
+# 使用している標準ライブラリ（インストール不要）:
+# - os, sys, csv, json, re, time, argparse
+# - datetime, pathlib
+# - urllib.request, urllib.parse, urllib.error
+# - typing
+
+# 外部ライブラリの依存関係はありません

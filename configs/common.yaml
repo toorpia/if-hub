@@ -1,0 +1,18 @@
+# IF-HUB PI-Ingester 共通設定
+
+pi_api:
+  host: "10.255.234.21"
+  port: 3011
+  timeout: 30000
+  max_retries: 3
+  retry_interval: 5000
+
+# ログ設定
+logging:
+  level: "info"
+  file: "/app/logs/ingester.log"
+
+# データ取得設定
+data_acquisition:
+  fetch_margin_seconds: 30    # 現在時刻から差し引く秒数（データ遅延考慮）
+  max_history_days: 30        # 初回取得時の最大遡り日数

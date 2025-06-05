@@ -1,0 +1,62 @@
+basemap:
+  update:
+    type: "fix"
+    interval: "10D"
+    begin: "2025-03-01T00:00:00+09:00"
+    end: "2025-03-01T00:00:00+09:00"
+
+  heatmap:
+    effective_radius: 0.1
+    z_axis: 0.5
+    resolution: 100
+
+  detabn:
+    mw: 5
+    rt: 1.0
+    th: 0.0
+    manual_mask:
+      - [20, 20, 30, 30]
+      - [50, 50, 55, 55]
+
+  ignore_period:
+    - start: "2025-03-01T00:00:00+09:00"
+      end: "2025-03-01T01:00:00+09:00"
+    - start: "2025-03-02T00:00:00+09:00"
+      end: "2025-03-02T00:10:00+09:00"
+
+  area:
+    - type: "ellipse"
+      x: -0.11337024374999997
+      y: -0.29319890625
+      radX: 0.32803095468943977
+      radY: 0.2082443701118354
+      rot: 0
+    - type: "ellipse"
+      x: -0.39223498125
+      y: 0.10164228749999998
+      radX: 0.3132879904337346
+      radY: 0.33908817788121864
+      rot: 0
+    - type: "ellipse"
+      x: 0.20589078749999998
+      y: -0.011727956250000005
+      radX: 0.22298733436754056
+      radY: 0.2266730754314668
+      rot: 0
+
+  addplot:
+    interval: "10m"
+    lookback_period: "10D"
+
+  source_tags:
+    - "POW:711034.PV"
+    - "POW:7T105B1.PV"
+
+  gtags:
+    - "POW:711034.PV.MA5"
+    - "POW:7T105B1.PV.MA5"
+
+# PI-Ingester専用設定
+pi_integration:
+  enabled: true
+  # output_filename は自動生成: 7th-untan.csv
