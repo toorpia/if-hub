@@ -1,0 +1,33 @@
+# IF-HUB PI Data Ingester 設備設定ファイル（テンプレート）
+# 本ファイルをコピーして実際の設備名のディレクトリに配置してください
+# 例: configs/equipments/Plant01/config.yaml
+
+basemap:
+  addplot:
+    interval: "10m"               # データ取得間隔
+                                  # 指定可能な値: 1m, 5m, 10m, 15m, 30m, 1h, 2h, 6h, 12h, 1d
+    lookback_period: "10D"        # 参照期間
+                                  # 指定可能な値: 1D, 7D, 30D, 90D等
+
+  source_tags:                    # 取得対象のPIタグリスト
+    - "EXAMPLE:TEMP.PV"           # 温度タグの例
+    - "EXAMPLE:PRESS.PV"          # 圧力タグの例
+    - "EXAMPLE:FLOW.PV"           # 流量タグの例
+    - "EXAMPLE:LEVEL.PV"          # レベルタグの例
+
+pi_integration:
+  enabled: true                   # PI連携有効化（必須: true）
+  # output_filename は自動生成: {設備名}.csv
+
+# 設定変更時の注意事項:
+# 1. source_tags のタグ名を顧客のPI Systemの実際のタグ名に変更
+# 2. interval は取得頻度とサーバー負荷を考慮して設定
+# 3. enabled は常に true に設定（false にするとデータ取得が停止）
+
+# 新しい設備設定ファイルの作成手順:
+# 1. 設備名のディレクトリを作成: mkdir -p configs/equipments/{設備名}
+# 2. 本ファイルをコピー: cp config.yaml.example configs/equipments/{設備名}/config.yaml
+# 3. source_tags を実際のPIタグ名に変更
+# 4. interval を要件に合わせて調整
+# 
+# 出力ファイルは自動的に {設備名}.csv として static_equipment_data/ に保存されます

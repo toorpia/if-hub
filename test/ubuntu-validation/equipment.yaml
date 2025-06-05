@@ -1,0 +1,10 @@
+# PI Batch Ingester用 設備設定ファイル（スタンドアロン版）
+# このファイル1つだけで動作します
+
+basemap:
+  source_tags:
+    - "POW:711034.PV"
+    - "POW:7T105B1.PV"
+
+pi_integration:
+  enabled: true
