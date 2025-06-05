@@ -8,6 +8,9 @@
 
 - **IF-Hub**: メインのデータ管理・可視化システム
 - **PI-Ingester**: PI SystemからのプロセスデータをIF-Hubに取り込むサービス
+  - **CSV自動変換**: PI-APIからの生データをIF-HUB形式に自動変換
+  - **メタデータ抽出**: タグの表示名と単位を自動抽出してtranslations_ja.csvに保存
+  - **重複チェック**: 既存メタデータとの重複を避けて効率的に更新
 
 ## 前提条件
 
@@ -63,6 +66,7 @@ services:
       - ./configs:/app/configs:ro           # 設定ファイル（読み取り専用）
       - ./logs:/app/logs                    # ログファイル
       - ./static_equipment_data:/app/static_equipment_data  # CSV出力先
+      - ./tag_metadata:/app/tag_metadata    # タグメタデータ（translations ファイル）
     environment:
       - TZ=${TZ:-Asia/Tokyo}
       - NODE_ENV=production
@@ -208,6 +212,7 @@ cd if-hub-export
 docker ps | grep if-hub
 docker logs if-hub-pi-ingester
 ls -la static_equipment_data/
+ls -la tag_metadata/
 ```
 
 ### if-hub-export/ の構成
@@ -336,16 +341,25 @@ docker logs if-hub-pi-ingester
 # 出力ファイルの確認
 ls -la static_equipment_data/
 
+# メタデータファイルの確認
+ls -la tag_metadata/
+cat tag_metadata/translations_ja.csv
+
 # 状態ファイルの確認
 cat logs/ingester-state.json
+
+# メタデータ抽出ログの確認
+docker logs if-hub-pi-ingester | grep "metadata"
 ```
 
 #### 正常動作の確認ポイント
 
 1. **PI API接続成功**: ログに「PI-API fetch successful」が表示される
 2. **CSVファイル出力**: `static_equipment_data/`にCSVファイルが作成される
-3. **状態管理**: `logs/ingester-state.json`が更新される
-4. **スケジュール実行**: 設定間隔でデータ取得が実行される
+3. **メタデータ抽出**: `tag_metadata/translations_ja.csv`にタグ情報が保存される
+4. **CSV自動変換**: IF-HUB形式（ヘッダー行のみ、メタデータ行なし）で出力される
+5. **状態管理**: `logs/ingester-state.json`が更新される
+6. **スケジュール実行**: 設定間隔でデータ取得が実行される
 
 ## トラブルシューティング
 

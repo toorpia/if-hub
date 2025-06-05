@@ -32,6 +32,7 @@ services:
       - ../configs:/app/configs:ro           # 設定ファイル（読み取り専用）
       - ../logs:/app/logs                    # ログファイル
       - ../static_equipment_data:/app/static_equipment_data  # CSV出力先
+      - ../tag_metadata:/app/tag_metadata    # タグメタデータ（translations ファイル）
     environment:
       - TZ=${TZ:-Asia/Tokyo}
       - NODE_ENV=production

@@ -123,27 +123,27 @@ export class DataIngestionScheduler {
       const response = await this.piApiClient.fetchData(request);
 
       if (response.success && response.data) {
-        // CSV検証
-        const validation = this.csvOutput.validateCSVData(response.data);
-        if (!validation.valid) {
-          throw new Error(`Invalid CSV data: ${validation.error}`);
-        }
-
-        console.log(`Received valid CSV data: ${validation.lineCount} lines`);
+        console.log(`Received CSV data from PI-API: ${response.data.split('\n').length} lines`);
 
         // ファイル出力（自動ファイル名: {設備名}.csv）
         const outputFilename = `${equipmentName}.csv`;
-        await this.csvOutput.writeCSVFile(outputFilename, response.data);
+        
+        // PI-APIからの生データを処理してIF-HUB形式に変換、メタデータを抽出・更新
+        const processResult = await this.csvOutput.processAndWriteRawCSV(outputFilename, response.data);
+
+        if (!processResult.success) {
+          throw new Error(`CSV processing failed: ${processResult.error}`);
+        }
 
         // 成功状態を記録
         this.stateManager.updateFetchSuccess(equipmentKey, fetchTime);
 
-        console.log(`✅ Successfully processed ${equipmentKey}: ${validation.lineCount} records`);
+        console.log(`✅ Successfully processed ${equipmentKey}: ${processResult.processedLineCount} records, ${processResult.extractedMetadataCount} metadata entries`);
         
         return {
           success: true,
           data: response.data,
-          fetchedCount: validation.lineCount,
+          fetchedCount: processResult.processedLineCount || 0,
         };
 
       } else {

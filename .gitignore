@@ -80,3 +80,8 @@ cm.txt
 if-hub-export/
 
 test/output/
+
+# Test data files
+equipment.csv
+equipment.zip
+ingester/test_output/
