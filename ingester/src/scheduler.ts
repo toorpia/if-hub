@@ -51,6 +51,10 @@ export class DataIngestionScheduler {
       return;
     }
 
+    // 起動時の状態同期を実行
+    console.log('=== Performing startup state synchronization ===');
+    await this.performStartupSync(equipmentConfigs.map(config => config.equipment));
+
     // 各設備のスケジュールを設定
     for (const { equipment } of equipmentConfigs) {
       await this.scheduleEquipment(equipment);
@@ -165,26 +169,56 @@ export class DataIngestionScheduler {
   }
 
   /**
-   * 取得期間を計算
+   * 取得期間を計算（StateManagerとCSVファイルの整合性を考慮）
    */
   private calculateFetchPeriod(equipmentKey: string): { startTime: Date; endTime: Date } {
     const now = new Date();
     const marginMs = this.commonConfig.data_acquisition.fetch_margin_seconds * 1000;
     const endTime = new Date(now.getTime() - marginMs);
 
-    // 前回取得時刻を確認
-    const lastFetchTime = this.stateManager.getLastFetchTime(equipmentKey);
+    // StateManagerから前回取得時刻を確認
+    const stateLastFetchTime = this.stateManager.getLastFetchTime(equipmentKey);
+    
+    // 既存CSVファイルから最新時刻を確認
+    const outputFilename = `${equipmentKey}.csv`;
+    const csvLastTimestamp = this.csvOutput.getLastTimestampFromFile(outputFilename);
     
     let startTime: Date;
+    let syncRequired = false;
     
-    if (lastFetchTime) {
-      // 前回取得時刻から継続
-      startTime = new Date(lastFetchTime.getTime() + 1000); // 1秒後から
+    if (stateLastFetchTime && csvLastTimestamp) {
+      // 両方存在する場合：より新しい時刻を使用
+      const stateTime = stateLastFetchTime.getTime();
+      const csvTime = csvLastTimestamp.getTime();
+      
+      if (Math.abs(stateTime - csvTime) > 60000) { // 1分以上の差がある場合
+        console.warn(`State/CSV timestamp mismatch for ${equipmentKey}: State=${stateLastFetchTime.toISOString()}, CSV=${csvLastTimestamp.toISOString()}`);
+        syncRequired = true;
+      }
+      
+      // より新しい時刻から継続
+      const laterTime = stateTime > csvTime ? stateLastFetchTime : csvLastTimestamp;
+      startTime = new Date(laterTime.getTime() + 1000); // 1秒後から
+      
+      if (syncRequired) {
+        console.log(`Syncing state with CSV file for ${equipmentKey}, starting from ${startTime.toISOString()}`);
+      }
+      
+    } else if (stateLastFetchTime) {
+      // StateManagerのみ存在：そのまま使用
+      startTime = new Date(stateLastFetchTime.getTime() + 1000);
+      console.log(`Using state manager time for ${equipmentKey}: ${startTime.toISOString()}`);
+      
+    } else if (csvLastTimestamp) {
+      // CSVファイルのみ存在：CSVの最新時刻から継続
+      startTime = new Date(csvLastTimestamp.getTime() + 1000);
+      console.log(`Using CSV file time for ${equipmentKey}: ${startTime.toISOString()}`);
+      
     } else {
-      // 初回取得：最大履歴日数から開始
+      // どちらも存在しない：初回取得
       const maxHistoryDays = this.commonConfig.data_acquisition.max_history_days;
       startTime = this.stateManager.calculateInitialFetchTime(maxHistoryDays);
-      console.log(`Initial fetch for ${equipmentKey}, going back ${maxHistoryDays} days`);
+      console.log(`Initial fetch for ${equipmentKey}, going back ${maxHistoryDays} days: ${startTime.toISOString()}`);
     }
 
     return { startTime, endTime };
@@ -218,6 +252,49 @@ export class DataIngestionScheduler {
       const days = Math.floor(intervalSeconds / 86400);
       return `0 0 */${days} * *`;
     }
+  }
+
+  /**
+   * 起動時の状態同期を実行
+   */
+  private async performStartupSync(equipmentNames: string[]): Promise<void> {
+    for (const equipmentName of equipmentNames) {
+      try {
+        const equipmentKey = equipmentName;
+        const outputFilename = `${equipmentKey}.csv`;
+        
+        // StateManagerとCSVファイルの状態を確認
+        const stateLastFetchTime = this.stateManager.getLastFetchTime(equipmentKey);
+        const csvLastTimestamp = this.csvOutput.getLastTimestampFromFile(outputFilename);
+        const csvFileInfo = this.csvOutput.getFileInfo(outputFilename);
+        
+        console.log(`Checking sync status for ${equipmentKey}:`);
+        console.log(`  State Manager: ${stateLastFetchTime ? stateLastFetchTime.toISOString() : 'None'}`);
+        console.log(`  CSV File: ${csvLastTimestamp ? csvLastTimestamp.toISOString() : 'None'} (exists: ${csvFileInfo.exists})`);
+        
+        // 同期が必要かどうかを判定
+        if (stateLastFetchTime && csvLastTimestamp) {
+          const timeDiff = Math.abs(stateLastFetchTime.getTime() - csvLastTimestamp.getTime());
+          if (timeDiff > 60000) { // 1分以上の差
+            console.warn(`⚠️  Significant timestamp mismatch detected for ${equipmentKey}: ${timeDiff}ms difference`);
+            console.log(`  Will sync automatically during next fetch operation`);
+          } else {
+            console.log(`✅ State and CSV file are in sync for ${equipmentKey}`);
+          }
+        } else if (!stateLastFetchTime && csvLastTimestamp) {
+          console.log(`📄 CSV file exists but no state record for ${equipmentKey} - will sync on next fetch`);
+        } else if (stateLastFetchTime && !csvLastTimestamp) {
+          console.log(`💾 State record exists but no CSV file for ${equipmentKey} - will regenerate file`);
+        } else {
+          console.log(`🆕 Fresh start for ${equipmentKey} - no previous state or CSV file`);
+        }
+        
+      } catch (error) {
+        console.warn(`Failed to sync ${equipmentName}: ${error}`);
+      }
+    }
+    
+    console.log('Startup synchronization completed');
   }
 
   /**

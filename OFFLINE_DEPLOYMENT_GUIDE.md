@@ -38,6 +38,7 @@ services:
     image: if-hub:imported  # docker importで作成したイメージ名
     container_name: if-hub
     user: "0:0"             # root権限で実行（権限問題回避）
+    working_dir: /app       # docker importで失われた作業ディレクトリを明示的に指定
     command: npm start      # docker importではエントリポイントが失われるため必須
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
@@ -61,6 +62,7 @@ services:
     image: pi-ingester:imported  # docker importで作成したイメージ名
     container_name: if-hub-pi-ingester
     user: "0:0"                  # root権限で実行（権限問題回避）
+    working_dir: /app            # docker importで失われた作業ディレクトリを明示的に指定
     command: node dist/index.js  # docker importではエントリポイントが失われるため必須
     volumes:
       - ./configs:/app/configs:ro           # 設定ファイル（読み取り専用）
@@ -122,7 +124,7 @@ echo "PI-Ingesterコンテナイメージをインポートしています..."
 cat pi-ingester-container.tar | docker import - pi-ingester:imported
 
 echo "コンテナを起動しています..."
-docker-compose up -d
+docker compose up -d
 
 echo "セットアップが完了しました。以下のコマンドでステータスを確認できます："
 echo "docker ps | grep if-hub"
@@ -368,9 +370,11 @@ docker logs if-hub-pi-ingester | grep "metadata"
 ```bash
 # 詳細なエラーログを確認
 docker logs if-hub
+docker logs if-hub-pi-ingester
 
 # 手動でコンテナを起動して問題を特定
 docker run --rm -it if-hub:imported /bin/sh
+docker run --rm -it pi-ingester:imported /bin/sh
 ```
 
 ### ポートの競合がある場合

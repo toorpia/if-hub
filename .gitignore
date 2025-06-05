@@ -82,6 +82,9 @@ if-hub-export/
 test/output/
 
 # Test data files
+ingester/test_output/
+
+# temporary files
 equipment.csv
 equipment.zip
-ingester/test_output/
+error.log
