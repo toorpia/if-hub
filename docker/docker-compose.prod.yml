@@ -24,3 +24,21 @@ services:
       - EXTERNAL_API_URL=https://external-system-url/api  # replace this with the external system's URL
       - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
     restart: unless-stopped
+
+  pi-ingester:
+    build:
+      context: ../ingester
+      dockerfile: Dockerfile
+    container_name: if-hub-pi-ingester-prod
+    volumes:
+      - ../configs:/app/configs:ro           # 設定ファイル（読み取り専用）
+      - ../logs:/app/logs                    # ログファイル
+      - ../static_equipment_data:/app/static_equipment_data  # CSV出力先
+    environment:
+      - TZ=${TZ:-Asia/Tokyo}
+      - NODE_ENV=production
+    restart: unless-stopped
+    depends_on:
+      - if-hub
+    networks:
+      - default

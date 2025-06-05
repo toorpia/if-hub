@@ -1,0 +1,23 @@
+# IF-HUB PI Data Ingester 共通設定ファイル（サンプル）
+# 本ファイルをコピーして common.yaml として使用してください
+
+pi_api:
+  host: "192.168.1.100"           # PI-API-Serverのホスト（顧客環境に合わせて変更）
+  port: 3011                      # PI-API-Serverのポート
+  timeout: 30000                  # タイムアウト（ミリ秒）
+  max_retries: 3                  # 最大リトライ回数
+  retry_interval: 5000            # リトライ間隔（ミリ秒）
+
+logging:
+  level: "info"                   # ログレベル（debug, info, warn, error）
+  file: "/app/logs/ingester.log"  # ログファイルパス
+
+data_acquisition:
+  fetch_margin_seconds: 30        # データ遅延考慮秒数
+  max_history_days: 30            # 初回取得時の最大遡り日数
+
+# 設定変更時の注意事項:
+# 1. pi_api.host を顧客のPI-API-ServerのIPアドレスに変更
+# 2. pi_api.port が顧客環境のポート設定と一致するか確認
+# 3. logging.level はデバッグ時のみ "debug" に変更
+# 4. data_acquisition.max_history_days は初回データ取得量を調整

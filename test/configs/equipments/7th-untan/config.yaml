@@ -1,0 +1,24 @@
+# テスト用7th-untan設備設定（高速テスト）
+basemap:
+  update:
+    type: "fix"
+    interval: "1D"
+    begin: "2025-06-04T00:00:00+09:00"
+    end: "2025-06-04T23:59:59+09:00"
+
+  addplot:
+    interval: "30s"           # 30秒間隔でテスト（本番は10m）
+    lookback_period: "1H"     # 1時間の短い期間
+
+  source_tags:
+    - "POW:711034.PV"
+    - "POW:7T105B1.PV"
+
+  gtags:
+    - "POW:711034.PV.MA5"
+    - "POW:7T105B1.PV.MA5"
+
+# PI-Ingester専用設定
+pi_integration:
+  enabled: true
+  # output_filename は自動生成: 7th-untan.csv

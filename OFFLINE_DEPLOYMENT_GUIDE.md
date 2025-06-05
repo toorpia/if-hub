@@ -4,6 +4,11 @@
 
 本手順書は、現在稼働中のIF-Hubプロジェクトを、インターネット接続のない別サーバーに移行するための手順を示します。`docker export`コマンドを使用してコンテナをエクスポートし、移行先で`docker import`でイメージを復元します。
 
+## システム構成
+
+- **IF-Hub**: メインのデータ管理・可視化システム
+- **PI-Ingester**: PI SystemからのプロセスデータをIF-Hubに取り込むサービス
+
 ## 前提条件
 
 - 移行元サーバー：現在IF-Hubが稼働中
@@ -29,6 +34,7 @@ services:
   if-hub:
     image: if-hub:imported  # docker importで作成したイメージ名
     container_name: if-hub
+    user: "0:0"             # root権限で実行（権限問題回避）
     command: npm start      # docker importではエントリポイントが失われるため必須
     ports:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
@@ -47,17 +53,36 @@ services:
       - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
       - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
     restart: unless-stopped
+
+  pi-ingester:
+    image: pi-ingester:imported  # docker importで作成したイメージ名
+    container_name: if-hub-pi-ingester
+    user: "0:0"                  # root権限で実行（権限問題回避）
+    command: node dist/index.js  # docker importではエントリポイントが失われるため必須
+    volumes:
+      - ./configs:/app/configs:ro           # 設定ファイル（読み取り専用）
+      - ./logs:/app/logs                    # ログファイル
+      - ./static_equipment_data:/app/static_equipment_data  # CSV出力先
+    environment:
+      - TZ=${TZ:-Asia/Tokyo}
+      - NODE_ENV=production
+    restart: unless-stopped
+    depends_on:
+      - if-hub
 EOF
 ```
 
 #### 1.3 コンテナのエクスポート
 
 ```bash
-# コンテナをtarファイルにエクスポート
+# IF-Hubコンテナをtarファイルにエクスポート
 docker export if-hub > if-hub-container.tar
 
+# PI-Ingesterコンテナをtarファイルにエクスポート
+docker export if-hub-pi-ingester > pi-ingester-container.tar
+
 # ファイルサイズの確認
-ls -lh if-hub-container.tar
+ls -lh if-hub-container.tar pi-ingester-container.tar
 ```
 
 #### 1.4 必要なファイルの準備
@@ -67,8 +92,9 @@ ls -lh if-hub-container.tar
 mkdir -p if-hub-export
 
 # 設定ファイルの移動
-cp docker-compose.import.yml if-hub-export/docker-compose.yml
-cp if-hub-container.tar if-hub-export/
+mv docker-compose.import.yml if-hub-export/docker-compose.yml
+mv if-hub-container.tar if-hub-export/
+mv pi-ingester-container.tar if-hub-export/
 
 # データディレクトリのコピー
 cp -r src if-hub-export/
@@ -77,24 +103,35 @@ cp -r tag_metadata if-hub-export/
 cp -r gtags if-hub-export/
 cp -r logs if-hub-export/
 cp -r db if-hub-export/
+cp -r configs if-hub-export/  # PI-Ingester設定ファイル
 cp package.json if-hub-export/
 
 # 移行用スクリプトの作成
 cat > if-hub-export/setup.sh << 'EOF'
 #!/bin/bash
-# IF-Hub セットアップスクリプト
+# IF-Hub + PI-Ingester セットアップスクリプト
 
-echo "コンテナイメージをインポートしています..."
+echo "IF-Hubコンテナイメージをインポートしています..."
 cat if-hub-container.tar | docker import - if-hub:imported
+
+echo "PI-Ingesterコンテナイメージをインポートしています..."
+cat pi-ingester-container.tar | docker import - pi-ingester:imported
 
 echo "コンテナを起動しています..."
 docker-compose up -d
 
 echo "セットアップが完了しました。以下のコマンドでステータスを確認できます："
 echo "docker ps | grep if-hub"
+echo ""
+echo "PI-Ingesterのログ確認: docker logs if-hub-pi-ingester"
+echo "IF-Hubのログ確認: docker logs if-hub"
 EOF
 
 chmod +x if-hub-export/setup.sh
+
+# 顧客先用PI-Ingester設定スクリプトのコピー
+cp ingester/configure-pi.sh if-hub-export/configure-pi.sh
+chmod +x if-hub-export/configure-pi.sh
 
 # 全ファイルを圧縮
 tar -czf if-hub-export.tar.gz if-hub-export/
@@ -113,14 +150,26 @@ tar -xzf if-hub-export.tar.gz -C /path/to/
 cd /path/to/if-hub-export
 ```
 
-#### 2.2 Dockerコンテナのインポートと起動
+#### 2.2 PI-Ingester設定
+
+```bash
+# PI-Ingesterの設定を実行（対話式）
+./configure-pi.sh
+```
+
+この設定スクリプトで以下を行います：
+- PI-API-Serverのホスト・ポート設定
+- 設備設定ファイルの作成
+- PI-Tagリストの設定
+
+#### 2.3 Dockerコンテナのインポートと起動
 
 ```bash
 # セットアップスクリプトを実行
 ./setup.sh
 ```
 
-#### 2.3 動作確認
+#### 2.4 動作確認
 
 ```bash
 # コンテナの起動状態を確認
@@ -132,6 +181,171 @@ docker logs if-hub
 # ブラウザで確認（ポート番号は環境に合わせて調整）
 # http://[サーバーのIP]:3001
 ```
+
+## 顧客先作業フロー要約
+
+### 前提条件
+- `if-hub-export.tar.gz` を顧客先に転送済み
+- Dockerがインストール済み
+
+### 作業手順（顧客先）
+
+```bash
+# 1. ファイル展開
+tar -xzf if-hub-export.tar.gz
+cd if-hub-export
+
+# 2. PI-Ingester設定（対話式）
+./configure-pi.sh
+# → PI-API-Serverのホスト・ポート設定
+# → 設備設定の作成とPI-Tag設定
+
+# 3. システム起動
+./setup.sh
+# → Dockerコンテナのインポート・起動
+
+# 4. 動作確認
+docker ps | grep if-hub
+docker logs if-hub-pi-ingester
+ls -la static_equipment_data/
+```
+
+### if-hub-export/ の構成
+
+```
+if-hub-export/
+├── setup.sh                     # システム起動スクリプト
+├── configure-pi.sh              # PI-Ingester設定スクリプト
+├── docker-compose.yml           # 統合サービス定義
+├── if-hub-container.tar         # IF-Hubコンテナイメージ
+├── pi-ingester-container.tar    # PI-Ingesterコンテナイメージ
+├── configs/                     # PI-Ingester設定ファイル
+│   ├── common.yaml.example      # 共通設定テンプレート
+│   └── equipments/example/      # 設備設定テンプレート
+├── src/                         # IF-Hubソースコード
+├── static_equipment_data/       # CSV出力先
+├── tag_metadata/                # タグメタデータ
+├── gtags/                       # gtag定義
+├── logs/                        # ログディレクトリ
+├── db/                          # データベースファイル
+└── package.json                 # IF-Hub依存関係
+```
+
+## PI-Ingester設定ガイド
+
+### 設定ファイルの構成
+
+PI-Ingesterは以下の設定ファイルを使用します：
+
+```
+configs/
+├── common.yaml                    # 共通設定（PI API接続情報等）
+└── equipments/                    # 設備別設定
+    └── {設備名}/
+        └── {設定名}.yaml         # 設備固有の設定
+```
+
+### 共通設定ファイル（configs/common.yaml）
+
+```yaml
+pi_api:
+  host: "10.255.234.21"           # 顧客のPI-API-Serverのホスト
+  port: 3011                      # PI-API-Serverのポート
+  timeout: 30000                  # タイムアウト（ミリ秒）
+  max_retries: 3                  # 最大リトライ回数
+  retry_interval: 5000            # リトライ間隔（ミリ秒）
+
+logging:
+  level: "info"                   # ログレベル（debug, info, warn, error）
+  file: "/app/logs/ingester.log"  # ログファイルパス
+
+data_acquisition:
+  fetch_margin_seconds: 30        # データ遅延考慮秒数
+  max_history_days: 30            # 初回取得時の最大遡り日数
+```
+
+### 設備設定ファイル例（configs/equipments/{設備名}/config.yaml）
+
+```yaml
+basemap:
+  addplot:
+    interval: "10m"               # データ取得間隔（1m, 5m, 10m, 1h等）
+    lookback_period: "10D"        # 参照期間（1D, 7D, 30D等）
+
+  source_tags:                    # 取得対象のPIタグ
+    - "POW:711034.PV"
+    - "POW:7T105B1.PV"
+    - "TEMP:T101.PV"
+
+pi_integration:
+  enabled: true                   # PI連携有効化
+  # output_filename は自動生成: {設備名}.csv
+```
+
+### 顧客環境での設定変更手順
+
+#### 1. PI API接続設定の変更
+
+```bash
+# 顧客環境のPI-API-Server情報に合わせて編集
+vi configs/common.yaml
+
+# 例：IPアドレスとポートの変更
+pi_api:
+  host: "192.168.1.100"  # 顧客のPI-API-ServerのIP
+  port: 3011
+```
+
+#### 2. 設備・タグ設定の追加
+
+```bash
+# 新しい設備設定を追加
+mkdir -p configs/equipments/Plant01
+vi configs/equipments/Plant01/realtime.yaml
+
+# 設備固有のタグを設定
+source_tags:
+  - "PLANT01:TEMP.PV"
+  - "PLANT01:PRESS.PV"
+  - "PLANT01:FLOW.PV"
+```
+
+#### 3. データ取得間隔の調整
+
+```bash
+# 設備設定ファイルを編集
+vi configs/equipments/{設備名}/{設定名}.yaml
+
+# 取得間隔を変更（例：5分間隔に変更）
+basemap:
+  addplot:
+    interval: "5m"
+```
+
+### PI-Ingester動作確認
+
+#### 起動後の確認手順
+
+```bash
+# PI-Ingesterコンテナの状態確認
+docker ps | grep pi-ingester
+
+# ログの確認
+docker logs if-hub-pi-ingester
+
+# 出力ファイルの確認
+ls -la static_equipment_data/
+
+# 状態ファイルの確認
+cat logs/ingester-state.json
+```
+
+#### 正常動作の確認ポイント
+
+1. **PI API接続成功**: ログに「PI-API fetch successful」が表示される
+2. **CSVファイル出力**: `static_equipment_data/`にCSVファイルが作成される
+3. **状態管理**: `logs/ingester-state.json`が更新される
+4. **スケジュール実行**: 設定間隔でデータ取得が実行される
 
 ## トラブルシューティング
 
@@ -160,19 +374,106 @@ ls -la ./db ./logs
 chmod -R 755 ./db ./logs
 ```
 
+### PI-Ingester固有の問題
+
+#### PI API接続エラー
+
+```bash
+# エラー例: "No response from server: ECONNREFUSED"
+docker logs if-hub-pi-ingester
+
+# 解決手順:
+# 1. PI-API-Serverのホスト・ポート設定を確認
+vi configs/common.yaml
+
+# 2. ネットワーク接続テスト
+ping [PI-API-ServerのIP]
+telnet [PI-API-ServerのIP] 3011
+
+# 3. PI-API-Serverの起動状態確認
+# （顧客側で確認してもらう）
+```
+
+#### 設定ファイル読み込みエラー
+
+```bash
+# エラー例: "Failed to load equipment config"
+# 設定ファイルの存在確認
+ls -la configs/equipments/*/
+
+# 設定ファイルの構文チェック
+python3 -c "import yaml; yaml.safe_load(open('configs/common.yaml'))"
+
+# 権限の確認・修正
+chmod 644 configs/common.yaml
+chmod -R 644 configs/equipments/
+```
+
+#### CSVファイル出力エラー
+
+```bash
+# エラー例: "Output directory is not writable"
+# ディレクトリの権限確認
+ls -la static_equipment_data/
+
+# 権限修正
+chmod 755 static_equipment_data/
+chown -R 1001:1001 static_equipment_data/
+```
+
+#### メモリ不足エラー
+
+```bash
+# コンテナリソース使用量確認
+docker stats if-hub-pi-ingester
+
+# メモリ制限の調整
+vi docker-compose.yml
+# 以下を追加:
+# services:
+#   pi-ingester:
+#     deploy:
+#       resources:
+#         limits:
+#           memory: 512M
+```
+
 ### その他の注意点
 
-1. 移行先サーバーの環境変数を必要に応じて設定してください：
+1. **環境変数設定**: 移行先サーバーの環境変数を必要に応じて設定してください：
    ```bash
    # 例: ポートを変更する場合
    export EXTERNAL_PORT=3002
    ```
 
-2. データの整合性を確保するため、移行元のコンテナを停止してからエクスポートすることも検討してください：
+2. **データ整合性**: データの整合性を確保するため、移行元のコンテナを停止してからエクスポートすることも検討してください：
    ```bash
-   docker stop if-hub
+   docker stop if-hub if-hub-pi-ingester
    docker export if-hub > if-hub-container.tar
-   docker start if-hub
+   docker export if-hub-pi-ingester > pi-ingester-container.tar
+   docker start if-hub if-hub-pi-ingester
    ```
 
-3. 定期的なバックアップ計画も検討してください。特にDBディレクトリは重要です。
+3. **バックアップ計画**: 定期的なバックアップ計画も検討してください。特に以下のディレクトリは重要です：
+   - `db/`: IF-Hubのデータベース
+   - `configs/`: PI-Ingesterの設定ファイル
+   - `static_equipment_data/`: 取得したプロセスデータ
+   - `logs/`: 実行ログと状態ファイル
+
+4. **監視とメンテナンス**: 
+   ```bash
+   # 定期的な動作確認スクリプト例
+   cat > check_system.sh << 'EOF'
+   #!/bin/bash
+   echo "=== IF-Hub + PI-Ingester 動作確認 ==="
+   echo "コンテナ状態:"
+   docker ps | grep if-hub
+   echo ""
+   echo "最新のデータファイル:"
+   ls -lt static_equipment_data/ | head -5
+   echo ""
+   echo "PI-Ingester状態:"
+   cat logs/ingester-state.json | grep -E "(lastSuccessTime|errorCount)"
+   EOF
+   chmod +x check_system.sh
+   ```

@@ -1,0 +1,15 @@
+# 手動テスト用共通設定（元はmock-pi-api、手動テスト用に一時変更）
+pi_api:
+  host: "127.0.0.1"           # localhost（手動テスト用）
+  port: 3011                  # モックサーバーのポート
+  timeout: 10000              # 短めのタイムアウト
+  max_retries: 2              # テスト用に少なめ
+  retry_interval: 2000        # 短いリトライ間隔
+
+logging:
+  level: "debug"              # 詳細ログでテスト
+  file: "./logs/ingester-test.log"
+
+data_acquisition:
+  fetch_margin_seconds: 10    # 短いマージン
+  max_history_days: 1         # テスト用に1日のみ
