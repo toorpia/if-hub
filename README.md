@@ -27,6 +27,14 @@ IF-HUBは以下の課題を解決します：
   - **簡単な定義方法**：JSONベースの定義ファイルで複雑な計算も簡単に設定
   - **多彩な計算タイプ**：単純な数式から、移動平均、Z-score、偏差値まで多様な処理に対応
   - **柔軟に拡張可能**：外部プログラム（Python、Rust、Go、C/C++等）を統合可能。容易な機能追加や拡張を実現
+- **データフェッチング機能（Fetcher）**：設備単位・条件付きでのタグ/gtagデータ抽出機構
+  - **条件付きフィルタリング**：特定の条件を満たす時間帯のみのデータを抽出
+  - **大量データ対応**：自動ファイル分割機能（デフォルト10万行ごと）
+  - **増分データ取得**：前回取得時刻からの継続的なデータ取得機能
+- **PI System連携機能（Ingester）**：PI Systemからの自動データ取り込み
+  - **自動スケジュール実行**：設備ごとに設定された間隔でのデータ自動取得
+  - **増分データ取得**：前回取得時刻から継続してデータを取得（重複回避）
+  - **メタデータ自動抽出**：タグの表示名と単位を自動抽出してtranslationsファイルに保存
 - **Docker対応**：コンテナ環境を活用した容易なデプロイとスケーラブルな運用を実現
 
 
@@ -273,6 +281,35 @@ IF-HUBは以下のディレクトリ構造で構成されています：
 │       ├── tag-metadata-importer.js # タグメタデータインポート
 │       ├── tag-utils.js     # タグユーティリティ
 │       └── time-utils.js    # 時間関連ユーティリティ
+│
+├── fetcher/                 # データ抽出・整形・条件フィルタリング機構
+│   ├── src/                 # Fetcherのソースコード
+│   │   ├── types/           # TypeScript型定義
+│   │   ├── io/              # I/O処理（ファイル・HTTP）
+│   │   ├── formatters/      # 出力フォーマッタ（CSV等）
+│   │   ├── api-client.ts    # IF-HUB APIクライアント
+│   │   ├── config.ts        # 設定ファイル処理
+│   │   ├── fetcher.ts       # コアロジック
+│   │   ├── filter.ts        # フィルタリング処理
+│   │   └── tag-validator.ts # タグ検証
+│   ├── cli/                 # CLIツール
+│   ├── config.yaml          # デフォルト設定
+│   └── run.sh               # 実行スクリプト
+│
+├── ingester/                # PI Systemデータ取り込み機構
+│   ├── src/                 # Ingesterのソースコード
+│   │   ├── types/           # TypeScript型定義
+│   │   ├── services/        # サービスクラス
+│   │   │   ├── config-loader.ts    # 設定ファイル読み込み
+│   │   │   ├── csv-output.ts       # CSV形式での出力
+│   │   │   ├── pi-api-client.ts    # PI API通信
+│   │   │   ├── state-manager.ts    # 取得状態管理
+│   │   │   └── tag-metadata.ts     # メタデータ処理
+│   │   ├── scheduler.ts     # スケジューラー
+│   │   └── index.ts         # エントリポイント
+│   ├── configs/             # 設定ファイル
+│   ├── Dockerfile           # Dockerイメージ定義
+│   └── configure-pi.sh      # 初期設定スクリプト
 │
 ├── gtags/                   # 仮想タグ定義と計算スクリプト
 ├── docker/                  # Docker関連設定ファイル

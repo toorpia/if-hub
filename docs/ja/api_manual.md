@@ -53,6 +53,19 @@
       - [tag\_translations テーブル](#tag_translations-テーブル)
       - [gtags テーブル](#gtags-テーブル)
     - [タグID参照の仕組み](#タグid参照の仕組み)
+  - [関連ツールとAPI連携](#関連ツールとapi連携)
+    - [Fetcherとの連携](#fetcherとの連携)
+      - [概要](#概要-1)
+      - [FetcherによるAPI利用の仕組み](#fetcherによるapi利用の仕組み)
+      - [条件付きデータ取得でのAPI活用](#条件付きデータ取得でのapi活用)
+      - [大量データ取得時のページネーション処理](#大量データ取得時のページネーション処理)
+      - [Fetcherの設定とAPI連携](#fetcherの設定とapi連携)
+    - [Ingesterとの連携](#ingesterとの連携)
+      - [概要](#概要-2)
+      - [データ取り込みフロー](#データ取り込みフロー)
+      - [メタデータの自動抽出と連携](#メタデータの自動抽出と連携)
+      - [増分データ取得との連携](#増分データ取得との連携)
+      - [スケジュール実行とAPI連携](#スケジュール実行とapi連携)
   - [実装例](#実装例)
     - [Node.js クライアント実装例](#nodejs-クライアント実装例)
     - [Python クライアント実装例](#python-クライアント実装例)
@@ -976,6 +989,227 @@ IF-HUBでは、ユーザー向けのタグ名とシステム内部のIDを区別
    ```
 
 この二重構造により、人間が理解しやすいインターフェースを維持しながら、データベースの効率性とパフォーマンスを最大化しています。これはとくに大量のデータポイントを持つシステムで重要な最適化です。
+
+## 関連ツールとAPI連携
+
+### Fetcherとの連携
+
+#### 概要
+
+IF-HUB Fetcherは、IF-HUB APIを活用してデータ抽出・条件付きフィルタリングを行うクライアントツールです。FetcherがIF-HUB APIを効率的に使用することで、大量データの取得や条件に基づく選択的なデータ抽出を実現しています。
+
+#### FetcherによるAPI利用の仕組み
+
+**1. データ取得フロー:**
+```
+Fetcher → IF-HUB API → データベース → APIレスポンス → CSV出力
+```
+
+**2. 使用される主要APIエンドポイント:**
+
+- **設備情報の取得:**
+  ```
+  GET /api/equipment?includeTags=true&includeGtags=true
+  ```
+  取得可能なタグとgtagの一覧を確認
+
+- **バッチデータ取得:**
+  ```
+  GET /api/batch?tags=Pump01.Temperature,Pump01.Pressure&start=2023-01-01T00:00:00Z&end=2023-01-31T23:59:59Z
+  ```
+  複数タグのデータを一度に取得
+
+- **時系列データ取得:**
+  ```
+  GET /api/data/:tagId?start=2023-01-01T00:00:00Z&end=2023-01-31T23:59:59Z
+  ```
+  個別タグのデータを取得
+
+#### 条件付きデータ取得でのAPI活用
+
+Fetcherの`only_when`構文は、以下のAPIパターンを使用してデータをフィルタリングします：
+
+**例: 温度が50度以上の時間帯のみのデータ取得**
+
+1. **条件判定用データの取得:**
+   ```
+   GET /api/data/Pump01.Temperature?start=2023-01-01T00:00:00Z&end=2023-01-31T23:59:59Z
+   ```
+
+2. **条件を満たす時間範囲の特定:**
+   ```javascript
+   // Fetcher内部処理
+   const conditionData = await fetchTemperatureData();
+   const validTimeRanges = conditionData.filter(point => point.value > 50);
+   ```
+
+3. **条件を満たす時間範囲のデータを取得:**
+   ```
+   GET /api/batch?tags=Pump01.Flow,Pump01.Pressure&start=2023-01-01T10:00:00Z&end=2023-01-01T15:00:00Z
+   ```
+
+#### 大量データ取得時のページネーション処理
+
+Fetcherは大量データを効率的に処理するため、以下のパターンでAPIを呼び出します：
+
+```javascript
+// 実装例（Fetcher内部）
+async function fetchLargeDataset(tagId, startTime, endTime) {
+  const pageSize = 1000;
+  let allData = [];
+  let currentStart = startTime;
+  
+  while (currentStart < endTime) {
+    const response = await fetch(
+      `/api/data/${tagId}?start=${currentStart}&pageSize=${pageSize}`
+    );
+    
+    const pageData = await response.json();
+    allData = allData.concat(pageData.data);
+    
+    // 次のページの開始時刻を設定
+    const lastPoint = pageData.data[pageData.data.length - 1];
+    currentStart = new Date(lastPoint.timestamp);
+  }
+  
+  return allData;
+}
+```
+
+#### Fetcherの設定とAPI連携
+
+**設定例（config.yaml）:**
+```yaml
+if_hub_api:
+  base_url: "http://localhost:3001"
+  timeout: 30000
+  max_records_per_request: 10000
+  page_size: 1000
+  
+equipment:
+  - name: Pump01
+    tags:
+      - Pump01.Flow
+      - Pump01.Temperature
+    conditions:
+      only_when:
+        - tag: Pump01.Temperature
+          condition: "> 45"
+```
+
+この設定に基づいて、Fetcherは以下のAPIコールを実行します：
+
+1. タグ検証: `GET /api/tags?equipment=Pump01`
+2. 条件データ取得: `GET /api/data/Pump01.Temperature`
+3. メインデータ取得: `GET /api/batch?tags=Pump01.Flow,Pump01.Temperature`
+
+### Ingesterとの連携
+
+#### 概要
+
+IF-HUB PI Data Ingesterは、PI SystemからIF-HUBへのデータ取り込みを自動化するツールです。PI-APIから取得したデータをIF-HUBの静的データ形式（CSV）に変換し、IF-HUBのデータ読み込み機能を活用してシステムに統合します。
+
+#### データ取り込みフロー
+
+```
+PI System → PI-API → Ingester → CSV出力 → IF-HUB自動読み込み → API利用可能
+```
+
+**1. PI-APIからのデータ取得:**
+```javascript
+// Ingester内部処理例
+const response = await axios.get(
+  `http://pi-api-server:3011/PIData?TagNames=${tagNames}&StartDate=${startDate}&EndDate=${endDate}`
+);
+```
+
+**2. IF-HUB形式への変換:**
+```javascript
+// PI-APIレスポンスをCSV形式に変換
+const csvData = convertToIFHubFormat(piApiResponse);
+```
+
+**3. CSV出力:**
+```
+static_equipment_data/7th-untan.csv
+```
+
+**4. IF-HUBによる自動読み込み:**
+IF-HUBの動的データ更新機能により、新しいCSVファイルが自動的に検出・読み込みされ、APIで利用可能になります。
+
+#### メタデータの自動抽出と連携
+
+Ingesterは、PI Systemからタグの表示名と単位情報を自動抽出し、IF-HUBのタグメタデータシステムと連携します：
+
+**1. メタデータ抽出:**
+```javascript
+// PI-APIからメタデータを取得
+const metadataResponse = await axios.get(
+  `http://pi-api-server:3011/TagAttributes?TagNames=${tagNames}`
+);
+```
+
+**2. translations_ja.csvの生成:**
+```csv
+source_tag,display_name,unit
+POW:711034.PV,電力計測値,kW
+POW:7T105B1.PV,温度計測値,°C
+```
+
+**3. IF-HUBでの表示名適用:**
+生成されたtranslationsファイルにより、以下のAPIで表示名が利用可能になります：
+
+```
+GET /api/tags?display=true&lang=ja
+GET /api/data/7th-untan.POW:711034.PV?display=true
+```
+
+#### 増分データ取得との連携
+
+Ingesterの増分データ取得機能は、IF-HUBのタイムスタンプベースのデータ管理と連携して効率的な更新を実現します：
+
+**1. 最終取得時刻の管理:**
+```json
+// ingester-state.json
+{
+  "equipment": {
+    "7th-untan/short-term": {
+      "lastFetchTime": "2025-06-04T03:00:00.000Z",
+      "lastSuccessTime": "2025-06-04T03:00:00.000Z"
+    }
+  }
+}
+```
+
+**2. 増分データの取得:**
+```javascript
+// 前回取得時刻以降のデータのみを取得
+const startDate = state.lastFetchTime;
+const endDate = new Date();
+```
+
+**3. IF-HUBでの重複回避:**
+IF-HUBの`INSERT OR REPLACE`機能により、同じタイムスタンプのデータは自動的に更新され、重複が回避されます。
+
+#### スケジュール実行とAPI連携
+
+Ingesterのスケジュール実行により、定期的にデータが更新され、IF-HUB APIで最新データが利用可能になります：
+
+**設定例:**
+```yaml
+basemap:
+  addplot:
+    interval: "10m"  # 10分ごとに実行
+    lookback_period: "10D"
+```
+
+**実行サイクル:**
+1. 10分ごとにPI-APIからデータ取得
+2. CSV形式で出力
+3. IF-HUBが1分以内に自動検出・読み込み
+4. APIで最新データが利用可能
+
+この連携により、ほぼリアルタイムでPI SystemのデータをIF-HUB APIで利用できます。
 
 ## 実装例
 
