@@ -162,4 +162,60 @@ export class StateManager {
     const equipmentState = this.getEquipmentState(equipmentKey);
     return equipmentState.lastError;
   }
+
+  /**
+   * 実際に取得したデータの最新時刻を取得
+   */
+  getActualLastDataTime(equipmentKey: string): Date | null {
+    const equipmentState = this.getEquipmentState(equipmentKey);
+    return equipmentState.actualLastDataTime ? new Date(equipmentState.actualLastDataTime) : null;
+  }
+
+  /**
+   * 実際に取得したデータの最新時刻を更新
+   */
+  updateActualDataTime(equipmentKey: string, actualTime: Date): void {
+    const equipmentState = this.getEquipmentState(equipmentKey);
+    equipmentState.actualLastDataTime = actualTime.toISOString();
+    this.saveState();
+    console.log(`Updated actual data time for ${equipmentKey}: ${actualTime.toISOString()}`);
+  }
+
+  /**
+   * 保留中のGap期間を設定（接続失敗時）
+   */
+  setPendingGap(equipmentKey: string, startDate: Date, endDate: Date): void {
+    const equipmentState = this.getEquipmentState(equipmentKey);
+    equipmentState.pendingGapStartDate = startDate.toISOString();
+    equipmentState.pendingGapEndDate = endDate.toISOString();
+    this.saveState();
+    console.log(`Set pending gap for ${equipmentKey}: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+  }
+
+  /**
+   * 保留中のGap期間をクリア（接続成功時）
+   */
+  clearPendingGap(equipmentKey: string): void {
+    const equipmentState = this.getEquipmentState(equipmentKey);
+    if (equipmentState.pendingGapStartDate || equipmentState.pendingGapEndDate) {
+      console.log(`Clearing pending gap for ${equipmentKey}: ${equipmentState.pendingGapStartDate} to ${equipmentState.pendingGapEndDate}`);
+      equipmentState.pendingGapStartDate = undefined;
+      equipmentState.pendingGapEndDate = undefined;
+      this.saveState();
+    }
+  }
+
+  /**
+   * 保留中のGap期間を取得
+   */
+  getPendingGap(equipmentKey: string): { startDate: Date; endDate: Date } | null {
+    const equipmentState = this.getEquipmentState(equipmentKey);
+    if (equipmentState.pendingGapStartDate && equipmentState.pendingGapEndDate) {
+      return {
+        startDate: new Date(equipmentState.pendingGapStartDate),
+        endDate: new Date(equipmentState.pendingGapEndDate),
+      };
+    }
+    return null;
+  }
 }

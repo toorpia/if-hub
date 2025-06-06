@@ -129,6 +129,9 @@ export class DataIngestionScheduler {
       if (response.success && response.data) {
         console.log(`Received CSV data from PI-API: ${response.data.split('\n').length} lines`);
 
+        // 実際に取得したデータの時刻範囲を抽出
+        const { actualStartTime, actualEndTime } = this.extractActualDataTimeRange(response.data);
+
         // ファイル出力（自動ファイル名: {設備名}.csv）
         const outputFilename = `${equipmentName}.csv`;
         
@@ -141,6 +144,14 @@ export class DataIngestionScheduler {
 
         // 成功状態を記録
         this.stateManager.updateFetchSuccess(equipmentKey, fetchTime);
+
+        // 実際に取得したデータの最新時刻を記録（境界欠落防止）
+        if (actualEndTime) {
+          this.stateManager.updateActualDataTime(equipmentKey, actualEndTime);
+        }
+
+        // Gap処理：接続成功時は保留中のGapをクリア
+        this.stateManager.clearPendingGap(equipmentKey);
 
         console.log(`✅ Successfully processed ${equipmentKey}: ${processResult.processedLineCount} records, ${processResult.extractedMetadataCount} metadata entries`);
         
@@ -161,6 +172,10 @@ export class DataIngestionScheduler {
       // エラー状態を記録
       this.stateManager.updateFetchError(equipmentKey, fetchTime, errorMessage);
       
+      // Gap処理：接続失敗時は今回の期間を保留Gap期間として記録
+      const { startTime, endTime } = this.calculateFetchPeriod(equipmentKey);
+      this.stateManager.setPendingGap(equipmentKey, startTime, endTime);
+      
       return {
         success: false,
         error: errorMessage,
@@ -169,56 +184,71 @@ export class DataIngestionScheduler {
   }
 
   /**
-   * 取得期間を計算（StateManagerとCSVファイルの整合性を考慮）
+   * 取得期間を計算（Gap回復と境界欠落防止を考慮）
    */
   private calculateFetchPeriod(equipmentKey: string): { startTime: Date; endTime: Date } {
     const now = new Date();
     const marginMs = this.commonConfig.data_acquisition.fetch_margin_seconds * 1000;
     const endTime = new Date(now.getTime() - marginMs);
 
-    // StateManagerから前回取得時刻を確認
+    // 優先順位1: 保留中のGap期間（接続failure復旧時）
+    const pendingGap = this.stateManager.getPendingGap(equipmentKey);
+    if (pendingGap) {
+      console.log(`🔄 Gap recovery for ${equipmentKey}: ${pendingGap.startDate.toISOString()} to ${endTime.toISOString()}`);
+      return { 
+        startTime: pendingGap.startDate, 
+        endTime 
+      };
+    }
+
+    // 優先順位2: 実際に取得したデータの最新時刻（境界欠落防止）
+    const actualLastDataTime = this.stateManager.getActualLastDataTime(equipmentKey);
+    if (actualLastDataTime) {
+      console.log(`📊 Using actual data time for ${equipmentKey}: ${actualLastDataTime.toISOString()}`);
+      return { 
+        startTime: actualLastDataTime, 
+        endTime 
+      };
+    }
+
+    // 優先順位3: StateManagerから前回取得時刻を確認（フォールバック）
     const stateLastFetchTime = this.stateManager.getLastFetchTime(equipmentKey);
     
-    // 既存CSVファイルから最新時刻を確認
+    // 優先順位4: 既存CSVファイルから最新時刻を確認（フォールバック）
     const outputFilename = `${equipmentKey}.csv`;
     const csvLastTimestamp = this.csvOutput.getLastTimestampFromFile(outputFilename);
     
     let startTime: Date;
-    let syncRequired = false;
     
     if (stateLastFetchTime && csvLastTimestamp) {
-      // 両方存在する場合：より新しい時刻を使用
+      // 両方存在する場合：古い時刻を使用（保守的アプローチ）
       const stateTime = stateLastFetchTime.getTime();
       const csvTime = csvLastTimestamp.getTime();
       
       if (Math.abs(stateTime - csvTime) > 60000) { // 1分以上の差がある場合
         console.warn(`State/CSV timestamp mismatch for ${equipmentKey}: State=${stateLastFetchTime.toISOString()}, CSV=${csvLastTimestamp.toISOString()}`);
-        syncRequired = true;
       }
       
-      // より新しい時刻から継続
-      const laterTime = stateTime > csvTime ? stateLastFetchTime : csvLastTimestamp;
-      startTime = new Date(laterTime.getTime() + 1000); // 1秒後から
-      
-      if (syncRequired) {
-        console.log(`Syncing state with CSV file for ${equipmentKey}, starting from ${startTime.toISOString()}`);
-      }
+      // 古い時刻から継続（保守的アプローチ：重複は許可、欠損は回避）
+      const earlierTime = stateTime < csvTime ? stateLastFetchTime : csvLastTimestamp;
+      startTime = earlierTime;
+      console.log(`📋 Using earlier time for ${equipmentKey}: ${startTime.toISOString()} (conservative approach)`);
       
     } else if (stateLastFetchTime) {
-      // StateManagerのみ存在：そのまま使用
-      startTime = new Date(stateLastFetchTime.getTime() + 1000);
-      console.log(`Using state manager time for ${equipmentKey}: ${startTime.toISOString()}`);
+      // StateManagerのみ存在
+      startTime = stateLastFetchTime;
+      console.log(`📋 Using state manager time for ${equipmentKey}: ${startTime.toISOString()}`);
       
     } else if (csvLastTimestamp) {
-      // CSVファイルのみ存在：CSVの最新時刻から継続
-      startTime = new Date(csvLastTimestamp.getTime() + 1000);
-      console.log(`Using CSV file time for ${equipmentKey}: ${startTime.toISOString()}`);
+      // CSVファイルのみ存在
+      startTime = csvLastTimestamp;
+      console.log(`📋 Using CSV file time for ${equipmentKey}: ${startTime.toISOString()}`);
       
     } else {
       // どちらも存在しない：初回取得
       const maxHistoryDays = this.commonConfig.data_acquisition.max_history_days;
       startTime = this.stateManager.calculateInitialFetchTime(maxHistoryDays);
-      console.log(`Initial fetch for ${equipmentKey}, going back ${maxHistoryDays} days: ${startTime.toISOString()}`);
+      console.log(`🆕 Initial fetch for ${equipmentKey}, going back ${maxHistoryDays} days: ${startTime.toISOString()}`);
     }
 
     return { startTime, endTime };
@@ -310,6 +340,64 @@ export class DataIngestionScheduler {
     
     this.scheduledTasks.clear();
     console.log('Scheduler stopped');
+  }
+
+  /**
+   * CSVデータから実際のデータの時刻範囲を抽出
+   */
+  private extractActualDataTimeRange(csvData: string): { actualStartTime?: Date; actualEndTime?: Date } {
+    try {
+      const lines = csvData.split('\n').filter(line => line.trim());
+      
+      if (lines.length <= 1) {
+        return {}; // ヘッダーのみまたは空データ
+      }
+
+      const headers = lines[0].split(',');
+      
+      // タイムスタンプ列を特定
+      const timestampIndex = headers.findIndex(h => 
+        h.toLowerCase().includes('time') || h.toLowerCase().includes('date')
+      );
+
+      if (timestampIndex === -1) {
+        console.warn('No timestamp column found in CSV data');
+        return {};
+      }
+
+      let earliestTime: Date | undefined;
+      let latestTime: Date | undefined;
+
+      // データ行を処理
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        if (cols[timestampIndex] && cols[timestampIndex].trim()) {
+          try {
+            const time = new Date(cols[timestampIndex].trim());
+            
+            if (!isNaN(time.getTime())) {
+              if (!earliestTime || time < earliestTime) {
+                earliestTime = time;
+              }
+              if (!latestTime || time > latestTime) {
+                latestTime = time;
+              }
+            }
+          } catch (error) {
+            // 無効な日付をスキップ
+            continue;
+          }
+        }
+      }
+
+      return {
+        actualStartTime: earliestTime,
+        actualEndTime: latestTime,
+      };
+    } catch (error) {
+      console.error('Failed to extract data time range from CSV:', error);
+      return {};
+    }
   }
 
   /**
