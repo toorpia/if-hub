@@ -298,6 +298,127 @@ docker logs if-hub
 # http://[サーバーのIP]:3001
 ```
 
+## 運用を考慮したサービス起動手順
+
+### 初期データ取り込みの重要性
+
+現実的な運用では、サービス起動前にまとまった過去データが存在することが多く、これらを初期データとして取り込んだ上で定期データ取り込みに移行することが重要です。
+
+本システムでは以下の2段階アプローチを推奨します：
+
+1. **初期データ一括取り込み**：バッチツールで過去データを取り込み
+2. **定期データ取り込み**：PI-Ingesterサービスで継続的なデータ収集
+
+### 推奨運用フロー
+
+```
+┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+│ 1. 初期データ一括   │    │ 2. サービス起動      │    │ 3. 継続運用         │
+│    取り込み         │──→ │   (PI-Ingester)     │──→ │   (自動Gap補充)     │
+│ (pi-batch-ingester) │    │                      │    │                     │
+└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+```
+
+### 初期データ取り込み手順
+
+#### ステップ1: 取り込み期間の決定
+
+初期データの取り込み期間を決定します：
+
+```bash
+# 例1: 過去30日分を取り込む場合
+START_DATE=$(date -d '30 days ago' '+%Y-%m-%d')
+END_DATE=$(date '+%Y-%m-%d')
+
+# 例2: 特定期間を指定する場合
+START_DATE="2025-01-01"
+END_DATE="2025-01-31"
+
+echo "初期データ期間: $START_DATE から $END_DATE"
+```
+
+#### ステップ2: バッチツールでの一括取り込み
+
+PI-Ingesterに含まれるバッチツール `pi-batch-ingester.py` を使用します：
+
+```bash
+# 基本的な使用例
+cd ingester
+python tools/pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host 10.255.234.21 \
+  --port 3011 \
+  --start "2025-01-01" \
+  --end "2025-01-31" \
+  --output ../static_equipment_data/7th-untan.csv
+
+# 過去30日分の自動取り込み
+python tools/pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host 10.255.234.21 \
+  --port 3011 \
+  --start "$(date -d '30 days ago' '+%Y-%m-%d')" \
+  --end "$(date '+%Y-%m-%d')" \
+  --output ../static_equipment_data/7th-untan.csv
+```
+
+#### ステップ3: 初期データの確認
+
+取り込みが完了したら、データを確認します：
+
+```bash
+# CSVファイルの確認
+ls -la static_equipment_data/
+head -5 static_equipment_data/7th-untan.csv
+wc -l static_equipment_data/7th-untan.csv
+
+# データ期間の確認（最初と最後の行）
+head -2 static_equipment_data/7th-untan.csv
+tail -1 static_equipment_data/7th-untan.csv
+```
+
+#### ステップ4: サービス起動と定期取り込み
+
+初期データ取り込み完了後、通常のサービスを起動：
+
+```bash
+# PI-Ingesterサービス起動
+./setup.sh
+
+# サービス状態確認
+docker ps | grep if-hub
+docker logs if-hub-pi-ingester
+```
+
+### 複数設備での初期データ取り込み
+
+複数の設備設定がある場合の一括処理例：
+
+```bash
+#!/bin/bash
+# 複数設備の初期データ取り込みスクリプト例
+
+PI_HOST="10.255.234.21"
+PI_PORT="3011"
+START_DATE="2025-01-01"
+END_DATE="2025-01-31"
+
+for config_file in configs/equipments/*/config.yaml; do
+  equipment_name=$(basename $(dirname $config_file))
+  echo "処理中: $equipment_name"
+  
+  python ingester/tools/pi-batch-ingester.py \
+    --config "$config_file" \
+    --host "$PI_HOST" \
+    --port "$PI_PORT" \
+    --start "$START_DATE" \
+    --end "$END_DATE" \
+    --output "static_equipment_data/${equipment_name}.csv"
+done
+
+echo "全設備の初期データ取り込み完了"
+```
+
 ## 顧客先作業フロー要約
 
 ### 前提条件
@@ -316,11 +437,21 @@ cd if-hub-export
 # → PI-API-Serverのホスト・ポート設定
 # → 設備設定の作成とPI-Tag設定
 
-# 3. システム起動
+# 3. 初期データ取り込み（推奨）
+cd ingester
+python tools/pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host [PI_HOST] --port [PI_PORT] \
+  --start "$(date -d '30 days ago' '+%Y-%m-%d')" \
+  --end "$(date '+%Y-%m-%d')" \
+  --output ../static_equipment_data/7th-untan.csv
+cd ..
+
+# 4. システム起動
 ./setup.sh
 # → Dockerコンテナのインポート・起動
 
-# 4. 動作確認
+# 5. 動作確認
 docker ps | grep if-hub
 docker logs if-hub-pi-ingester
 ls -la static_equipment_data/
@@ -568,6 +699,187 @@ vi docker-compose.yml
 #           memory: 512M
 ```
 
+### 初期データ取り込みのベストプラクティス
+
+#### 1. 大量データの分割処理
+
+長期間のデータを取り込む場合は、分割して処理することを推奨します：
+
+```bash
+#!/bin/bash
+# 大量データの分割取り込みスクリプト例
+
+PI_HOST="10.255.234.21"
+PI_PORT="3011"
+CONFIG_FILE="configs/equipments/7th-untan/config.yaml"
+OUTPUT_BASE="static_equipment_data/7th-untan"
+
+# 3ヶ月分のデータを月単位で分割取り込み
+START_DATE="2025-01-01"
+for month in {1..3}; do
+  month_start=$(date -d "$START_DATE +$((month-1)) month" '+%Y-%m-01')
+  month_end=$(date -d "$month_start +1 month -1 day" '+%Y-%m-%d')
+  
+  echo "取り込み中: $month_start から $month_end"
+  
+  python ingester/tools/pi-batch-ingester.py \
+    --config "$CONFIG_FILE" \
+    --host "$PI_HOST" \
+    --port "$PI_PORT" \
+    --start "$month_start" \
+    --end "$month_end" \
+    --output "${OUTPUT_BASE}_${month_start:0:7}.csv"
+    
+  # 取り込み間隔（PI-Serverへの負荷軽減）
+  sleep 10
+done
+
+# 個別ファイルを統合
+cat ${OUTPUT_BASE}_*.csv > ${OUTPUT_BASE}.csv
+rm ${OUTPUT_BASE}_20*.csv
+```
+
+#### 2. データ重複チェック
+
+既存データとの重複を確認する方法：
+
+```bash
+# 既存CSVファイルの時刻範囲を確認
+if [ -f "static_equipment_data/7th-untan.csv" ]; then
+  echo "既存データの時刻範囲:"
+  echo "開始: $(head -2 static_equipment_data/7th-untan.csv | tail -1 | cut -d',' -f1)"
+  echo "終了: $(tail -1 static_equipment_data/7th-untan.csv | cut -d',' -f1)"
+fi
+
+# 新しいデータとの重複チェック
+echo "新しいデータとの重複を確認..."
+# IF-Hub本体では重複datetimeは自動的に排除されるため、
+# 多少の重複は問題ありません
+```
+
+#### 3. データ品質確認
+
+取り込んだデータの品質を確認：
+
+```bash
+# データファイルの基本情報
+echo "=== データ品質確認 ==="
+for csv_file in static_equipment_data/*.csv; do
+  if [ -f "$csv_file" ]; then
+    echo "ファイル: $csv_file"
+    echo "  行数: $(wc -l < "$csv_file")"
+    echo "  サイズ: $(du -h "$csv_file" | cut -f1)"
+    
+    # 欠損値チェック（空文字、NULL、NaN）
+    empty_count=$(grep -c ',,\|^,\|,$' "$csv_file" 2>/dev/null || echo 0)
+    echo "  空データ: $empty_count 箇所"
+    
+    # 時刻の連続性チェック（サンプル）
+    echo "  時刻範囲:"
+    head -2 "$csv_file" | tail -1 | cut -d',' -f1 | sed 's/^/    開始: /'
+    tail -1 "$csv_file" | cut -d',' -f1 | sed 's/^/    終了: /'
+    echo ""
+  fi
+done
+```
+
+### 運用監視とメンテナンス
+
+#### 1. 自動監視スクリプト
+
+```bash
+# システム監視スクリプト (monitor_system.sh)
+cat > monitor_system.sh << 'EOF'
+#!/bin/bash
+
+LOG_FILE="system_monitor.log"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "[$TIMESTAMP] システム監視開始" >> $LOG_FILE
+
+# コンテナ状態確認
+if ! docker ps | grep -q "if-hub.*Up"; then
+  echo "[$TIMESTAMP] 警告: IF-Hubコンテナが停止しています" >> $LOG_FILE
+fi
+
+if ! docker ps | grep -q "if-hub-pi-ingester.*Up"; then
+  echo "[$TIMESTAMP] 警告: PI-Ingesterコンテナが停止しています" >> $LOG_FILE
+fi
+
+# ディスク使用量確認
+DISK_USAGE=$(df -h . | tail -1 | awk '{print $5}' | sed 's/%//')
+if [ $DISK_USAGE -gt 80 ]; then
+  echo "[$TIMESTAMP] 警告: ディスク使用量が ${DISK_USAGE}% です" >> $LOG_FILE
+fi
+
+# 最新データファイル確認
+LATEST_FILE=$(ls -t static_equipment_data/*.csv 2>/dev/null | head -1)
+if [ -n "$LATEST_FILE" ]; then
+  LAST_MODIFIED=$(stat -c %Y "$LATEST_FILE")
+  CURRENT_TIME=$(date +%s)
+  AGE_HOURS=$(( (CURRENT_TIME - LAST_MODIFIED) / 3600 ))
+  
+  if [ $AGE_HOURS -gt 2 ]; then
+    echo "[$TIMESTAMP] 警告: 最新データが ${AGE_HOURS} 時間前です" >> $LOG_FILE
+  fi
+fi
+
+# PI-Ingester状態確認
+if [ -f "logs/ingester-state.json" ]; then
+  ERROR_COUNT=$(grep -o '"errorCount":[0-9]*' logs/ingester-state.json | cut -d':' -f2 | head -1)
+  if [ "$ERROR_COUNT" -gt 5 ]; then
+    echo "[$TIMESTAMP] 警告: PI-Ingesterエラー数が ${ERROR_COUNT} です" >> $LOG_FILE
+  fi
+fi
+
+echo "[$TIMESTAMP] システム監視完了" >> $LOG_FILE
+EOF
+
+chmod +x monitor_system.sh
+
+# 定期実行設定（cronに追加する場合）
+echo "# IF-Hub システム監視（毎時実行）" 
+echo "0 * * * * cd /path/to/if-hub-export && ./monitor_system.sh"
+```
+
+#### 2. ログローテーション
+
+```bash
+# ログローテーション設定例
+cat > setup_logrotate.sh << 'EOF'
+#!/bin/bash
+
+# ログローテーション設定ファイルを作成
+cat > if-hub-logrotate << 'LOGROTATE_EOF'
+/path/to/if-hub-export/logs/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    copytruncate
+    create 644 root root
+}
+
+/path/to/if-hub-export/system_monitor.log {
+    weekly
+    missingok
+    rotate 12
+    compress
+    delaycompress
+    copytruncate
+    create 644 root root
+}
+LOGROTATE_EOF
+
+echo "ログローテーション設定を作成しました: if-hub-logrotate"
+echo "システムのlogrotateに追加してください:"
+echo "sudo cp if-hub-logrotate /etc/logrotate.d/"
+EOF
+
+chmod +x setup_logrotate.sh
+```
+
 ### その他の注意点
 
 1. **環境変数設定**: 移行先サーバーの環境変数を必要に応じて設定してください：
@@ -590,7 +902,16 @@ vi docker-compose.yml
    - `static_equipment_data/`: 取得したプロセスデータ
    - `logs/`: 実行ログと状態ファイル
 
-4. **監視とメンテナンス**: 
+4. **容量管理**: データの蓄積によるディスク容量の管理：
+   ```bash
+   # 古いCSVファイルのアーカイブ
+   find static_equipment_data/ -name "*.csv" -mtime +90 -exec gzip {} \;
+   
+   # 古いログファイルの削除
+   find logs/ -name "*.log" -mtime +30 -delete
+   ```
+
+5. **監視とメンテナンス**: 
    ```bash
    # 定期的な動作確認スクリプト例
    cat > check_system.sh << 'EOF'
@@ -604,6 +925,9 @@ vi docker-compose.yml
    echo ""
    echo "PI-Ingester状態:"
    cat logs/ingester-state.json | grep -E "(lastSuccessTime|errorCount)"
+   echo ""
+   echo "ディスク使用量:"
+   df -h .
    EOF
    chmod +x check_system.sh
    ```

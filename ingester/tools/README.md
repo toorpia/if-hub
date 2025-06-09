@@ -72,31 +72,159 @@ python pi-batch-ingester.py -c equipment.yaml --host 10.255.234.21 --port 3011 -
 
 ## 運用シナリオ
 
-### 1. 初期データ移行
+### 1. 初期データ移行（推奨運用フロー）
 
-顧客先でのシステム導入時、過去のプロセスデータを一括取得：
+**IF-Hub + PI-Ingesterサービス起動前の初期データ取り込み**
+
+顧客先でのシステム導入時の推奨手順：
 
 ```bash
-# 過去1年間のデータを取得
-python pi-batch-ingester.py --config ../configs/equipments/plant01/config.yaml --start "2024-01-01" --end "2024-12-31" --output "./migration/plant01-2024.csv"
+# ステップ1: 過去30日分の初期データを取得
+python pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host 10.255.234.21 \
+  --port 3011 \
+  --start "$(date -d '30 days ago' '+%Y-%m-%d')" \
+  --end "$(date '+%Y-%m-%d')" \
+  --output ../static_equipment_data/7th-untan.csv
+
+# ステップ2: データ確認
+head -5 ../static_equipment_data/7th-untan.csv
+wc -l ../static_equipment_data/7th-untan.csv
+
+# ステップ3: サービス起動（親ディレクトリで実行）
+cd .. && ./setup.sh
 ```
 
-### 2. データ補完
+**複数設備の一括初期データ取り込み**
+
+```bash
+#!/bin/bash
+# 全設備の初期データ取り込みスクリプト
+
+PI_HOST="10.255.234.21"
+PI_PORT="3011"
+START_DATE="$(date -d '30 days ago' '+%Y-%m-%d')"
+END_DATE="$(date '+%Y-%m-%d')"
+
+echo "初期データ取り込み開始: $START_DATE から $END_DATE"
+
+for config_file in ../configs/equipments/*/config.yaml; do
+  equipment_name=$(basename $(dirname $config_file))
+  echo "処理中: $equipment_name"
+  
+  python pi-batch-ingester.py \
+    --config "$config_file" \
+    --host "$PI_HOST" \
+    --port "$PI_PORT" \
+    --start "$START_DATE" \
+    --end "$END_DATE" \
+    --output "../static_equipment_data/${equipment_name}.csv"
+  
+  # PI-Serverへの負荷軽減のため間隔をあける
+  sleep 5
+done
+
+echo "全設備の初期データ取り込み完了"
+ls -la ../static_equipment_data/
+```
+
+### 2. 大量データの分割処理
+
+長期間のデータを安全に取り込む場合：
+
+```bash
+#!/bin/bash
+# 3ヶ月分のデータを月単位で分割取り込み
+
+CONFIG_FILE="../configs/equipments/7th-untan/config.yaml"
+PI_HOST="10.255.234.21"
+PI_PORT="3011"
+START_DATE="2025-01-01"
+
+for month in {1..3}; do
+  month_start=$(date -d "$START_DATE +$((month-1)) month" '+%Y-%m-01')
+  month_end=$(date -d "$month_start +1 month -1 day" '+%Y-%m-%d')
+  
+  echo "取り込み中: $month_start から $month_end"
+  
+  python pi-batch-ingester.py \
+    --config "$CONFIG_FILE" \
+    --host "$PI_HOST" \
+    --port "$PI_PORT" \
+    --start "$month_start" \
+    --end "$month_end" \
+    --output "../static_equipment_data/7th-untan_${month_start:0:7}.csv"
+    
+  sleep 10  # PI-Serverへの負荷軽減
+done
+
+# 個別ファイルを統合
+cd ../static_equipment_data
+cat 7th-untan_20*.csv > 7th-untan.csv
+rm 7th-untan_20*.csv
+```
+
+### 3. データ補完
 
 運用中にデータ欠損が発生した場合の補完：
 
 ```bash
 # 特定期間のデータを補完
-python pi-batch-ingester.py --config ../configs/equipments/7th-untan/config.yaml --start "2025-02-15 10:00:00" --end "2025-02-15 14:00:00" --output "./補完/7th-untan-0215.csv"
+python pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host 10.255.234.21 \
+  --port 3011 \
+  --start "2025-02-15 10:00:00" \
+  --end "2025-02-15 14:00:00" \
+  --output "./補完/7th-untan-0215.csv"
 ```
 
-### 3. 定期バックアップ
+### 4. 定期バックアップ
 
 月次や週次でのデータバックアップ：
 
 ```bash
 # 月次バックアップ
-python pi-batch-ingester.py --config ../configs/equipments/7th-untan/config.yaml --start "2025-01-01" --end "2025-01-31" --output "./backup/202501/7th-untan.csv"
+python pi-batch-ingester.py \
+  --config ../configs/equipments/7th-untan/config.yaml \
+  --host 10.255.234.21 \
+  --port 3011 \
+  --start "2025-01-01" \
+  --end "2025-01-31" \
+  --output "./backup/202501/7th-untan.csv"
+```
+
+### 5. データ品質確認
+
+取り込み後のデータ品質チェック：
+
+```bash
+#!/bin/bash
+# データ品質確認スクリプト
+
+CSV_FILE="../static_equipment_data/7th-untan.csv"
+
+if [ -f "$CSV_FILE" ]; then
+  echo "=== データ品質確認: $CSV_FILE ==="
+  echo "行数: $(wc -l < "$CSV_FILE")"
+  echo "サイズ: $(du -h "$CSV_FILE" | cut -f1)"
+  
+  # 時刻範囲確認
+  echo "時刻範囲:"
+  echo "  開始: $(head -2 "$CSV_FILE" | tail -1 | cut -d',' -f1)"
+  echo "  終了: $(tail -1 "$CSV_FILE" | cut -d',' -f1)"
+  
+  # 欠損値チェック
+  empty_count=$(grep -c ',,\|^,\|,$' "$CSV_FILE" 2>/dev/null || echo 0)
+  echo "空データ: $empty_count 箇所"
+  
+  # ヘッダー確認
+  echo "ヘッダー:"
+  head -1 "$CSV_FILE"
+else
+  echo "ファイルが存在しません: $CSV_FILE"
+fi
 ```
 
 ## 設定ファイル
