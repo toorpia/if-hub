@@ -114,295 +114,6 @@ cp package.json if-hub-export/
 
 # バッチツールと運用スクリプトのコピー
 cp -r ingester/tools if-hub-export/  # PI-Ingesterバッチツール
-mkdir -p if-hub-export/scripts      # 運用スクリプト格納ディレクトリ
-
-# 運用スクリプトの作成
-cat > if-hub-export/scripts/initial-data-import.sh << 'EOF'
-#!/bin/bash
-# 複数設備の初期データ取り込みスクリプト
-
-set -e
-
-PI_HOST="${1:-10.255.234.21}"
-PI_PORT="${2:-3011}"
-START_DATE="${3:-$(date -d '30 days ago' '+%Y-%m-%d')}"
-END_DATE="${4:-$(date '+%Y-%m-%d')}"
-
-echo "=== 複数設備の初期データ取り込み ==="
-echo "PI Host: $PI_HOST"
-echo "PI Port: $PI_PORT"
-echo "期間: $START_DATE から $END_DATE"
-echo ""
-
-if [ ! -d "configs/equipments" ]; then
-    echo "❌ configs/equipments ディレクトリが見つかりません"
-    exit 1
-fi
-
-# 設備設定ファイルを検索
-equipment_count=0
-for config_file in configs/equipments/*/config.yaml; do
-    if [ -f "$config_file" ]; then
-        equipment_name=$(basename $(dirname $config_file))
-        echo "処理中: $equipment_name"
-        
-        python tools/pi-batch-ingester.py \
-            --config "$config_file" \
-            --host "$PI_HOST" \
-            --port "$PI_PORT" \
-            --start "$START_DATE" \
-            --end "$END_DATE" \
-            --output "static_equipment_data/${equipment_name}.csv"
-        
-        # PI-Serverへの負荷軽減のため間隔をあける
-        sleep 5
-        equipment_count=$((equipment_count + 1))
-    fi
-done
-
-if [ $equipment_count -eq 0 ]; then
-    echo "❌ 有効な設備設定ファイルが見つかりません"
-    exit 1
-fi
-
-echo ""
-echo "✅ $equipment_count 設備の初期データ取り込み完了"
-echo "出力ファイル:"
-ls -la static_equipment_data/
-EOF
-
-cat > if-hub-export/scripts/bulk-data-import.sh << 'EOF'
-#!/bin/bash
-# 大量データの分割取り込みスクリプト
-
-set -e
-
-if [ $# -lt 4 ]; then
-    echo "使用方法: $0 <config_file> <pi_host> <pi_port> <start_date> [months]"
-    echo "例: $0 configs/equipments/7th-untan/config.yaml 10.255.234.21 3011 2025-01-01 3"
-    exit 1
-fi
-
-CONFIG_FILE="$1"
-PI_HOST="$2"
-PI_PORT="$3"
-START_DATE="$4"
-MONTHS="${5:-3}"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "❌ 設定ファイルが見つかりません: $CONFIG_FILE"
-    exit 1
-fi
-
-# 設備名を抽出
-EQUIPMENT_NAME=$(basename $(dirname $CONFIG_FILE))
-OUTPUT_BASE="static_equipment_data/${EQUIPMENT_NAME}"
-
-echo "=== 大量データの分割取り込み ==="
-echo "設備: $EQUIPMENT_NAME"
-echo "開始日: $START_DATE"
-echo "期間: ${MONTHS}ヶ月"
-echo ""
-
-# 月単位で分割取り込み
-for month in $(seq 1 $MONTHS); do
-    month_start=$(date -d "$START_DATE +$((month-1)) month" '+%Y-%m-01')
-    month_end=$(date -d "$month_start +1 month -1 day" '+%Y-%m-%d')
-    
-    echo "取り込み中: $month_start から $month_end"
-    
-    python tools/pi-batch-ingester.py \
-        --config "$CONFIG_FILE" \
-        --host "$PI_HOST" \
-        --port "$PI_PORT" \
-        --start "$month_start" \
-        --end "$month_end" \
-        --output "${OUTPUT_BASE}_${month_start:0:7}.csv"
-        
-    # 取り込み間隔（PI-Serverへの負荷軽減）
-    sleep 10
-done
-
-# 個別ファイルを統合
-echo ""
-echo "ファイルを統合中..."
-if ls ${OUTPUT_BASE}_20*.csv 1> /dev/null 2>&1; then
-    cat ${OUTPUT_BASE}_20*.csv > ${OUTPUT_BASE}.csv
-    rm ${OUTPUT_BASE}_20*.csv
-    echo "✅ 統合完了: ${OUTPUT_BASE}.csv"
-else
-    echo "❌ 統合対象ファイルが見つかりません"
-fi
-EOF
-
-cat > if-hub-export/scripts/data-quality-check.sh << 'EOF'
-#!/bin/bash
-# データ品質確認スクリプト
-
-echo "=== データ品質確認 ==="
-
-if [ ! -d "static_equipment_data" ]; then
-    echo "❌ static_equipment_data ディレクトリが見つかりません"
-    exit 1
-fi
-
-file_count=0
-for csv_file in static_equipment_data/*.csv; do
-    if [ -f "$csv_file" ]; then
-        echo ""
-        echo "ファイル: $csv_file"
-        echo "  行数: $(wc -l < "$csv_file")"
-        echo "  サイズ: $(du -h "$csv_file" | cut -f1)"
-        
-        # 欠損値チェック（空文字、NULL、NaN）
-        empty_count=$(grep -c ',,\|^,\|,$' "$csv_file" 2>/dev/null || echo 0)
-        echo "  空データ: $empty_count 箇所"
-        
-        # 時刻の連続性チェック
-        if [ $(wc -l < "$csv_file") -gt 1 ]; then
-            echo "  時刻範囲:"
-            head -2 "$csv_file" | tail -1 | cut -d',' -f1 | sed 's/^/    開始: /'
-            tail -1 "$csv_file" | cut -d',' -f1 | sed 's/^/    終了: /'
-        else
-            echo "  時刻範囲: データなし"
-        fi
-        
-        file_count=$((file_count + 1))
-    fi
-done
-
-echo ""
-if [ $file_count -eq 0 ]; then
-    echo "❌ CSVファイルが見つかりません"
-else
-    echo "✅ $file_count ファイルをチェックしました"
-fi
-EOF
-
-cat > if-hub-export/scripts/monitor-system.sh << 'EOF'
-#!/bin/bash
-# システム監視スクリプト
-
-LOG_FILE="system_monitor.log"
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-
-echo "[$TIMESTAMP] システム監視開始" >> $LOG_FILE
-
-# コンテナ状態確認
-if ! docker ps | grep -q "if-hub.*Up"; then
-  echo "[$TIMESTAMP] 警告: IF-Hubコンテナが停止しています" >> $LOG_FILE
-fi
-
-if ! docker ps | grep -q "if-hub-pi-ingester.*Up"; then
-  echo "[$TIMESTAMP] 警告: PI-Ingesterコンテナが停止しています" >> $LOG_FILE
-fi
-
-# ディスク使用量確認
-DISK_USAGE=$(df -h . | tail -1 | awk '{print $5}' | sed 's/%//')
-if [ $DISK_USAGE -gt 80 ]; then
-  echo "[$TIMESTAMP] 警告: ディスク使用量が ${DISK_USAGE}% です" >> $LOG_FILE
-fi
-
-# 最新データファイル確認
-LATEST_FILE=$(ls -t static_equipment_data/*.csv 2>/dev/null | head -1)
-if [ -n "$LATEST_FILE" ]; then
-  LAST_MODIFIED=$(stat -c %Y "$LATEST_FILE")
-  CURRENT_TIME=$(date +%s)
-  AGE_HOURS=$(( (CURRENT_TIME - LAST_MODIFIED) / 3600 ))
-  
-  if [ $AGE_HOURS -gt 2 ]; then
-    echo "[$TIMESTAMP] 警告: 最新データが ${AGE_HOURS} 時間前です" >> $LOG_FILE
-  fi
-fi
-
-# PI-Ingester状態確認
-if [ -f "logs/ingester-state.json" ]; then
-  ERROR_COUNT=$(grep -o '"errorCount":[0-9]*' logs/ingester-state.json | cut -d':' -f2 | head -1)
-  if [ "$ERROR_COUNT" -gt 5 ]; then
-    echo "[$TIMESTAMP] 警告: PI-Ingesterエラー数が ${ERROR_COUNT} です" >> $LOG_FILE
-  fi
-fi
-
-echo "[$TIMESTAMP] システム監視完了" >> $LOG_FILE
-EOF
-
-cat > if-hub-export/scripts/check-system.sh << 'EOF'
-#!/bin/bash
-# 定期的な動作確認スクリプト
-
-echo "=== IF-Hub + PI-Ingester 動作確認 ==="
-echo ""
-
-echo "コンテナ状態:"
-docker ps | grep if-hub || echo "  コンテナが見つかりません"
-echo ""
-
-echo "最新のデータファイル:"
-if [ -d "static_equipment_data" ]; then
-    ls -lt static_equipment_data/*.csv 2>/dev/null | head -5 || echo "  CSVファイルが見つかりません"
-else
-    echo "  static_equipment_data ディレクトリが見つかりません"
-fi
-echo ""
-
-echo "PI-Ingester状態:"
-if [ -f "logs/ingester-state.json" ]; then
-    cat logs/ingester-state.json | grep -E "(lastSuccessTime|errorCount)" || echo "  状態情報が見つかりません"
-else
-    echo "  状態ファイルが見つかりません"
-fi
-echo ""
-
-echo "ディスク使用量:"
-df -h . | tail -1
-echo ""
-
-echo "最近のログ（直近5行）:"
-if [ -f "logs/ingester.log" ]; then
-    tail -5 logs/ingester.log
-else
-    echo "  ログファイルが見つかりません"
-fi
-EOF
-
-cat > if-hub-export/scripts/setup-logrotate.sh << 'EOF'
-#!/bin/bash
-# ログローテーション設定作成スクリプト
-
-CURRENT_DIR=$(pwd)
-
-cat > if-hub-logrotate << LOGROTATE_EOF
-${CURRENT_DIR}/logs/*.log {
-    daily
-    missingok
-    rotate 30
-    compress
-    delaycompress
-    copytruncate
-    create 644 root root
-}
-
-${CURRENT_DIR}/system_monitor.log {
-    weekly
-    missingok
-    rotate 12
-    compress
-    delaycompress
-    copytruncate
-    create 644 root root
-}
-LOGROTATE_EOF
-
-echo "✅ ログローテーション設定を作成しました: if-hub-logrotate"
-echo ""
-echo "システムのlogrotateに追加するには:"
-echo "sudo cp if-hub-logrotate /etc/logrotate.d/"
-echo ""
-echo "手動でテストするには:"
-echo "sudo logrotate -d if-hub-logrotate"
-EOF
-
-# スクリプトに実行権限を付与
 chmod +x if-hub-export/scripts/*.sh
 
 # 移行用スクリプトの作成
@@ -721,37 +432,35 @@ echo "全設備の初期データ取り込み完了"
 ### 作業手順（顧客先）
 
 ```bash
-# 1. ファイル展開
+# ステップ1: 環境準備
 tar -xzf if-hub-export.tar.gz
 cd if-hub-export
 
-# 2. PI-Ingester設定（対話式）
+# ステップ2: PI-Ingester設定
 ./configure-pi.sh
 # → PI-API-Serverのホスト・ポート設定
 # → 設備設定の作成とPI-Tag設定
 
-# 3. 初期データ取り込み（推奨）
-# 方法1：複数設備一括取り込みスクリプトを使用
+# ステップ3: 初期データ取り込み（推奨）
 ./scripts/initial-data-import.sh [PI_HOST] [PI_PORT] [START_DATE] [END_DATE]
+# 例: ./scripts/initial-data-import.sh 10.255.234.21 3011 2025-01-01 2025-01-31
 
-# 方法2：個別にバッチツールを使用
-python tools/pi-batch-ingester.py \
-  --config configs/equipments/7th-untan/config.yaml \
-  --host [PI_HOST] --port [PI_PORT] \
-  --start "$(date -d '30 days ago' '+%Y-%m-%d')" \
-  --end "$(date '+%Y-%m-%d')" \
-  --output static_equipment_data/7th-untan.csv
-
-# 4. データ品質確認
+# ステップ4: データ品質確認
 ./scripts/data-quality-check.sh
 
-# 5. システム起動
+# ステップ5: システム起動
 ./setup.sh
-# → Dockerコンテナのインポート・起動
 
-# 6. 動作確認
+# ステップ6: 動作確認
 ./scripts/check-system.sh
 ```
+
+**各ステップの詳細**：
+
+- **ステップ3**: デフォルトで過去30日分のデータを全設備から取り込みます
+- **ステップ4**: 取り込んだデータの行数、サイズ、時刻範囲を確認します
+- **ステップ5**: Dockerコンテナのインポート・起動を自動実行します
+- **ステップ6**: コンテナ状態、最新データ、PI-Ingester状態を確認します
 
 ### if-hub-export/ の構成
 
@@ -1010,181 +719,49 @@ vi docker-compose.yml
 
 #### 1. 大量データの分割処理
 
-長期間のデータを取り込む場合は、分割して処理することを推奨します：
+長期間のデータを取り込む場合は、専用スクリプトを使用して分割処理します：
 
 ```bash
-#!/bin/bash
-# 大量データの分割取り込みスクリプト例
+# 大量データの分割取り込み（例：3ヶ月分）
+./scripts/bulk-data-import.sh configs/equipments/7th-untan/config.yaml 10.255.234.21 3011 2025-01-01 3
 
-PI_HOST="10.255.234.21"
-PI_PORT="3011"
-CONFIG_FILE="configs/equipments/7th-untan/config.yaml"
-OUTPUT_BASE="static_equipment_data/7th-untan"
-
-# 3ヶ月分のデータを月単位で分割取り込み
-START_DATE="2025-01-01"
-for month in {1..3}; do
-  month_start=$(date -d "$START_DATE +$((month-1)) month" '+%Y-%m-01')
-  month_end=$(date -d "$month_start +1 month -1 day" '+%Y-%m-%d')
-  
-  echo "取り込み中: $month_start から $month_end"
-  
-  python ingester/tools/pi-batch-ingester.py \
-    --config "$CONFIG_FILE" \
-    --host "$PI_HOST" \
-    --port "$PI_PORT" \
-    --start "$month_start" \
-    --end "$month_end" \
-    --output "${OUTPUT_BASE}_${month_start:0:7}.csv"
-    
-  # 取り込み間隔（PI-Serverへの負荷軽減）
-  sleep 10
-done
-
-# 個別ファイルを統合
-cat ${OUTPUT_BASE}_*.csv > ${OUTPUT_BASE}.csv
-rm ${OUTPUT_BASE}_20*.csv
+# 使用方法の確認
+./scripts/bulk-data-import.sh
 ```
 
-#### 2. データ重複チェック
+#### 2. データ品質確認
 
-既存データとの重複を確認する方法：
+取り込んだデータの品質確認は専用スクリプトで実行：
 
 ```bash
-# 既存CSVファイルの時刻範囲を確認
-if [ -f "static_equipment_data/7th-untan.csv" ]; then
-  echo "既存データの時刻範囲:"
-  echo "開始: $(head -2 static_equipment_data/7th-untan.csv | tail -1 | cut -d',' -f1)"
-  echo "終了: $(tail -1 static_equipment_data/7th-untan.csv | cut -d',' -f1)"
-fi
-
-# 新しいデータとの重複チェック
-echo "新しいデータとの重複を確認..."
-# IF-Hub本体では重複datetimeは自動的に排除されるため、
-# 多少の重複は問題ありません
+# 全CSVファイルの品質確認
+./scripts/data-quality-check.sh
 ```
 
-#### 3. データ品質確認
+#### 3. 重複データについて
 
-取り込んだデータの品質を確認：
-
-```bash
-# データファイルの基本情報
-echo "=== データ品質確認 ==="
-for csv_file in static_equipment_data/*.csv; do
-  if [ -f "$csv_file" ]; then
-    echo "ファイル: $csv_file"
-    echo "  行数: $(wc -l < "$csv_file")"
-    echo "  サイズ: $(du -h "$csv_file" | cut -f1)"
-    
-    # 欠損値チェック（空文字、NULL、NaN）
-    empty_count=$(grep -c ',,\|^,\|,$' "$csv_file" 2>/dev/null || echo 0)
-    echo "  空データ: $empty_count 箇所"
-    
-    # 時刻の連続性チェック（サンプル）
-    echo "  時刻範囲:"
-    head -2 "$csv_file" | tail -1 | cut -d',' -f1 | sed 's/^/    開始: /'
-    tail -1 "$csv_file" | cut -d',' -f1 | sed 's/^/    終了: /'
-    echo ""
-  fi
-done
-```
+IF-Hub本体では重複datetimeは自動的に排除されるため、多少の重複は問題ありません。
 
 ### 運用監視とメンテナンス
 
-#### 1. 自動監視スクリプト
+#### 1. システム監視
 
 ```bash
-# システム監視スクリプト (monitor_system.sh)
-cat > monitor_system.sh << 'EOF'
-#!/bin/bash
-
-LOG_FILE="system_monitor.log"
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-
-echo "[$TIMESTAMP] システム監視開始" >> $LOG_FILE
-
-# コンテナ状態確認
-if ! docker ps | grep -q "if-hub.*Up"; then
-  echo "[$TIMESTAMP] 警告: IF-Hubコンテナが停止しています" >> $LOG_FILE
-fi
-
-if ! docker ps | grep -q "if-hub-pi-ingester.*Up"; then
-  echo "[$TIMESTAMP] 警告: PI-Ingesterコンテナが停止しています" >> $LOG_FILE
-fi
-
-# ディスク使用量確認
-DISK_USAGE=$(df -h . | tail -1 | awk '{print $5}' | sed 's/%//')
-if [ $DISK_USAGE -gt 80 ]; then
-  echo "[$TIMESTAMP] 警告: ディスク使用量が ${DISK_USAGE}% です" >> $LOG_FILE
-fi
-
-# 最新データファイル確認
-LATEST_FILE=$(ls -t static_equipment_data/*.csv 2>/dev/null | head -1)
-if [ -n "$LATEST_FILE" ]; then
-  LAST_MODIFIED=$(stat -c %Y "$LATEST_FILE")
-  CURRENT_TIME=$(date +%s)
-  AGE_HOURS=$(( (CURRENT_TIME - LAST_MODIFIED) / 3600 ))
-  
-  if [ $AGE_HOURS -gt 2 ]; then
-    echo "[$TIMESTAMP] 警告: 最新データが ${AGE_HOURS} 時間前です" >> $LOG_FILE
-  fi
-fi
-
-# PI-Ingester状態確認
-if [ -f "logs/ingester-state.json" ]; then
-  ERROR_COUNT=$(grep -o '"errorCount":[0-9]*' logs/ingester-state.json | cut -d':' -f2 | head -1)
-  if [ "$ERROR_COUNT" -gt 5 ]; then
-    echo "[$TIMESTAMP] 警告: PI-Ingesterエラー数が ${ERROR_COUNT} です" >> $LOG_FILE
-  fi
-fi
-
-echo "[$TIMESTAMP] システム監視完了" >> $LOG_FILE
-EOF
-
-chmod +x monitor_system.sh
+# システム監視の実行
+./scripts/monitor-system.sh
 
 # 定期実行設定（cronに追加する場合）
-echo "# IF-Hub システム監視（毎時実行）" 
-echo "0 * * * * cd /path/to/if-hub-export && ./monitor_system.sh"
+echo "0 * * * * cd /path/to/if-hub-export && ./scripts/monitor-system.sh" | crontab -
 ```
 
-#### 2. ログローテーション
+#### 2. ログローテーション設定
 
 ```bash
-# ログローテーション設定例
-cat > setup_logrotate.sh << 'EOF'
-#!/bin/bash
+# ログローテーション設定の作成
+./scripts/setup-logrotate.sh
 
-# ログローテーション設定ファイルを作成
-cat > if-hub-logrotate << 'LOGROTATE_EOF'
-/path/to/if-hub-export/logs/*.log {
-    daily
-    missingok
-    rotate 30
-    compress
-    delaycompress
-    copytruncate
-    create 644 root root
-}
-
-/path/to/if-hub-export/system_monitor.log {
-    weekly
-    missingok
-    rotate 12
-    compress
-    delaycompress
-    copytruncate
-    create 644 root root
-}
-LOGROTATE_EOF
-
-echo "ログローテーション設定を作成しました: if-hub-logrotate"
-echo "システムのlogrotateに追加してください:"
-echo "sudo cp if-hub-logrotate /etc/logrotate.d/"
-EOF
-
-chmod +x setup_logrotate.sh
+# システムlogrotateへの追加
+sudo cp if-hub-logrotate /etc/logrotate.d/
 ```
 
 ### その他の注意点
