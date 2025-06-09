@@ -1,0 +1,42 @@
+services:
+  if-hub:
+    image: if-hub:imported  # docker importで作成したイメージ名
+    container_name: if-hub
+    user: "0:0"             # root権限で実行（権限問題回避）
+    working_dir: /app       # docker importで失われた作業ディレクトリを明示的に指定
+    command: npm start      # docker importではエントリポイントが失われるため必須
+    ports:
+      - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
+    volumes:
+      - ./src:/app/src
+      - ./static_equipment_data:/app/static_equipment_data
+      - ./tag_metadata:/app/tag_metadata
+      - ./gtags:/app/gtags        # gtag定義とカスタム実装
+      - ./logs:/app/logs
+      - ./db:/app/db  # データベースファイル用のボリューム
+      - ./package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
+      - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
+      - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
+    restart: unless-stopped
+
+  pi-ingester:
+    image: pi-ingester:imported  # docker importで作成したイメージ名
+    container_name: if-hub-pi-ingester
+    user: "0:0"                  # root権限で実行（権限問題回避）
+    working_dir: /app            # docker importで失われた作業ディレクトリを明示的に指定
+    command: node dist/index.js  # docker importではエントリポイントが失われるため必須
+    volumes:
+      - ./configs:/app/configs:ro           # 設定ファイル（読み取り専用）
+      - ./logs:/app/logs                    # ログファイル
+      - ./static_equipment_data:/app/static_equipment_data  # CSV出力先
+      - ./tag_metadata:/app/tag_metadata    # タグメタデータ（translations ファイル）
+    environment:
+      - TZ=${TZ:-Asia/Tokyo}
+      - NODE_ENV=production
+    restart: unless-stopped
+    depends_on:
+      - if-hub
