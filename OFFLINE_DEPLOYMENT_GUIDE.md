@@ -28,80 +28,20 @@
 docker ps | grep if-hub
 ```
 
-#### 1.2 移行用docker-compose.ymlファイルの作成
-
-```bash
-# 移行先用のdocker-compose.ymlを作成
-cat > docker-compose.import.yml << 'EOF'
-services:
-  if-hub:
-    image: if-hub:imported  # docker importで作成したイメージ名
-    container_name: if-hub
-    user: "0:0"             # root権限で実行（権限問題回避）
-    working_dir: /app       # docker importで失われた作業ディレクトリを明示的に指定
-    command: npm start      # docker importではエントリポイントが失われるため必須
-    ports:
-      - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
-    volumes:
-      - ./src:/app/src
-      - ./static_equipment_data:/app/static_equipment_data
-      - ./tag_metadata:/app/tag_metadata
-      - ./gtags:/app/gtags        # gtag定義とカスタム実装
-      - ./logs:/app/logs
-      - ./db:/app/db  # データベースファイル用のボリューム
-      - ./package.json:/app/package.json
-    environment:
-      - NODE_ENV=development
-      - PORT=3000
-      - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}  # 環境変数をコンテナ内でも使用可能に
-      - DB_PATH=/app/db/if_hub.db  # データベースファイルのパス
-      - TZ=${TZ:-Asia/Tokyo}  # ホストから取得したタイムゾーン、未設定の場合は日本時間
-    restart: unless-stopped
-
-  pi-ingester:
-    image: pi-ingester:imported  # docker importで作成したイメージ名
-    container_name: if-hub-pi-ingester
-    user: "0:0"                  # root権限で実行（権限問題回避）
-    working_dir: /app            # docker importで失われた作業ディレクトリを明示的に指定
-    command: node dist/index.js  # docker importではエントリポイントが失われるため必須
-    volumes:
-      - ./configs:/app/configs:ro           # 設定ファイル（読み取り専用）
-      - ./logs:/app/logs                    # ログファイル
-      - ./static_equipment_data:/app/static_equipment_data  # CSV出力先
-      - ./tag_metadata:/app/tag_metadata    # タグメタデータ（translations ファイル）
-    environment:
-      - TZ=${TZ:-Asia/Tokyo}
-      - NODE_ENV=production
-    restart: unless-stopped
-    depends_on:
-      - if-hub
-EOF
-```
 
 #### 1.3 コンテナのエクスポート
 
 ```bash
 # IF-Hubコンテナをtarファイルにエクスポート
-docker export if-hub > if-hub-container.tar
+docker export if-hub > if-hub-export/if-hub-container.tar
 
 # PI-Ingesterコンテナをtarファイルにエクスポート
-docker export if-hub-pi-ingester > pi-ingester-container.tar
-
-# ファイルサイズの確認
-ls -lh if-hub-container.tar pi-ingester-container.tar
+docker export if-hub-pi-ingester > if-hub-export/pi-ingester-container.tar
 ```
 
 #### 1.4 必要なファイルの準備
 
 ```bash
-# 移行用ディレクトリの作成
-mkdir -p if-hub-export
-
-# 設定ファイルの移動
-mv docker-compose.import.yml if-hub-export/docker-compose.yml
-mv if-hub-container.tar if-hub-export/
-mv pi-ingester-container.tar if-hub-export/
-
 # データディレクトリのコピー
 cp -r src if-hub-export/
 cp -r static_equipment_data if-hub-export/
@@ -338,25 +278,16 @@ basemap:
 
 #### 起動後の確認手順
 
+運用スクリプトを使用して効率的に確認：
+
 ```bash
-# PI-Ingesterコンテナの状態確認
-docker ps | grep pi-ingester
+# 総合的な動作確認
+./scripts/check-system.sh
 
-# ログの確認
+# 手動確認が必要な場合のみ
 docker logs if-hub-pi-ingester
-
-# 出力ファイルの確認
 ls -la static_equipment_data/
-
-# メタデータファイルの確認
-ls -la tag_metadata/
-cat tag_metadata/translations_ja.csv
-
-# 状態ファイルの確認
 cat logs/ingester-state.json
-
-# メタデータ抽出ログの確認
-docker logs if-hub-pi-ingester | grep "metadata"
 ```
 
 #### 正常動作の確認ポイント
@@ -367,6 +298,55 @@ docker logs if-hub-pi-ingester | grep "metadata"
 4. **CSV自動変換**: IF-HUB形式（ヘッダー行のみ、メタデータ行なし）で出力される
 5. **状態管理**: `logs/ingester-state.json`が更新される
 6. **スケジュール実行**: 設定間隔でデータ取得が実行される
+
+## 初期データ取り込みのベストプラクティス
+
+### 1. 大量データの分割処理
+
+長期間のデータを取り込む場合は、専用スクリプトを使用して分割処理します：
+
+```bash
+# 大量データの分割取り込み（例：3ヶ月分）
+./scripts/bulk-data-import.sh configs/equipments/7th-untan/config.yaml 10.255.234.21 3011 2025-01-01 3
+
+# 使用方法の確認
+./scripts/bulk-data-import.sh
+```
+
+### 2. データ品質確認
+
+取り込んだデータの品質確認は専用スクリプトで実行：
+
+```bash
+# 全CSVファイルの品質確認
+./scripts/data-quality-check.sh
+```
+
+### 3. 重複データについて
+
+IF-Hub本体では重複datetimeは自動的に排除されるため、多少の重複は問題ありません。
+
+## 運用監視とメンテナンス
+
+### 1. システム監視
+
+```bash
+# システム監視の実行
+./scripts/monitor-system.sh
+
+# 定期実行設定（cronに追加する場合）
+echo "0 * * * * cd /path/to/if-hub-export && ./scripts/monitor-system.sh" | crontab -
+```
+
+### 2. ログローテーション設定
+
+```bash
+# ログローテーション設定の作成
+./scripts/setup-logrotate.sh
+
+# システムlogrotateへの追加
+sudo cp if-hub-logrotate /etc/logrotate.d/
+```
 
 ## トラブルシューティング
 
@@ -461,55 +441,6 @@ vi docker-compose.yml
 #           memory: 512M
 ```
 
-### 初期データ取り込みのベストプラクティス
-
-#### 1. 大量データの分割処理
-
-長期間のデータを取り込む場合は、専用スクリプトを使用して分割処理します：
-
-```bash
-# 大量データの分割取り込み（例：3ヶ月分）
-./scripts/bulk-data-import.sh configs/equipments/7th-untan/config.yaml 10.255.234.21 3011 2025-01-01 3
-
-# 使用方法の確認
-./scripts/bulk-data-import.sh
-```
-
-#### 2. データ品質確認
-
-取り込んだデータの品質確認は専用スクリプトで実行：
-
-```bash
-# 全CSVファイルの品質確認
-./scripts/data-quality-check.sh
-```
-
-#### 3. 重複データについて
-
-IF-Hub本体では重複datetimeは自動的に排除されるため、多少の重複は問題ありません。
-
-### 運用監視とメンテナンス
-
-#### 1. システム監視
-
-```bash
-# システム監視の実行
-./scripts/monitor-system.sh
-
-# 定期実行設定（cronに追加する場合）
-echo "0 * * * * cd /path/to/if-hub-export && ./scripts/monitor-system.sh" | crontab -
-```
-
-#### 2. ログローテーション設定
-
-```bash
-# ログローテーション設定の作成
-./scripts/setup-logrotate.sh
-
-# システムlogrotateへの追加
-sudo cp if-hub-logrotate /etc/logrotate.d/
-```
-
 ### その他の注意点
 
 1. **環境変数設定**: 移行先サーバーの環境変数を必要に応じて設定してください：
@@ -541,23 +472,4 @@ sudo cp if-hub-logrotate /etc/logrotate.d/
    find logs/ -name "*.log" -mtime +30 -delete
    ```
 
-5. **監視とメンテナンス**: 
-   ```bash
-   # 定期的な動作確認スクリプト例
-   cat > check_system.sh << 'EOF'
-   #!/bin/bash
-   echo "=== IF-Hub + PI-Ingester 動作確認 ==="
-   echo "コンテナ状態:"
-   docker ps | grep if-hub
-   echo ""
-   echo "最新のデータファイル:"
-   ls -lt static_equipment_data/ | head -5
-   echo ""
-   echo "PI-Ingester状態:"
-   cat logs/ingester-state.json | grep -E "(lastSuccessTime|errorCount)"
-   echo ""
-   echo "ディスク使用量:"
-   df -h .
-   EOF
-   chmod +x check_system.sh
-   ```
+5. **動作確認**: 定期的な動作確認は `./scripts/check-system.sh` を使用
