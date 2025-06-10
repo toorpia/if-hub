@@ -358,6 +358,169 @@ PI-API-Serverへの接続をテスト：
 curl "http://10.255.234.21:3011/PIData?TagNames=POW:711034.PV&StartDate=20250101000000&EndDate=20250101010000"
 ```
 
+---
+
+# IF-Hub Fetcher
+
+IF-Hubからプロセスデータを抽出してCSV形式で保存するスタンドアロンツールです。
+
+## 概要
+
+IF-Hub Fetcherは、稼働中のIF-Hubサーバーからデータを抽出する下流処理ツールです。IF-Hubに蓄積されたデータをCSV形式で出力し、バックアップや外部システム連携に活用します。
+
+## ツールの位置づけ
+
+```
+PI System → [PI Ingester] → IF-Hub → [IF-Hub Fetcher] → CSV
+    ↑           上流処理         ↑         下流処理        ↓
+ データ源     データ投入      データ蓄積    データ抽出    外部出力
+```
+
+| ツール | データの流れ | 用途 |
+|--------|-------------|------|
+| **PI Batch Ingester** | PI System → CSV | PI Systemからの直接データ取得 |
+| **PI Ingester** | PI System → IF-Hub | 継続的なデータ投入（上流処理） |
+| **IF-Hub Fetcher** | IF-Hub → CSV | データ抽出・バックアップ（下流処理） |
+
+## 使用方法
+
+### 基本的な使用例
+
+```bash
+# IF-Hubからデータを抽出
+./if-hub-fetcher --equipment Pump01 --start-date 202501010900
+
+# 期間指定でデータを抽出
+./if-hub-fetcher --equipment Pump01 --start-date 202501010900 --end-date 202501011700
+
+# 複数設備の一括取得
+./if-hub-fetcher --equipment Pump01,Tank01 --start-date 202501010900 --end-date 202501011700
+
+# リモートIF-Hubサーバーからの取得
+./if-hub-fetcher --equipment Pump01 --start-date 202501010900 --host 192.168.1.100 --port 3001
+
+# カスタム出力先
+./if-hub-fetcher --equipment Pump01 --start-date 202501010900 --output-dir ./backup
+```
+
+### コマンドラインオプション
+
+| オプション | 短縮形 | 必須 | 説明 |
+|-----------|--------|-----|------|
+| `--equipment` | `-e` | ✅ | 設備名（カンマ区切りで複数指定可能） |
+| `--start-date` | `-s` | ✅ | 開始日時（YYYYMMDDHHmm形式） |
+| `--end-date` | `-n` | ❌ | 終了日時（省略時は最新データまで） |
+| `--host` | | ❌ | IF-HubのホストIP/ドメイン（デフォルト: localhost） |
+| `--port` | `-p` | ❌ | IF-Hubのポート番号（デフォルト: 3001） |
+| `--output-dir` | `-o` | ❌ | CSV出力先ディレクトリ（デフォルト: .） |
+| `--verbose` | `-v` | ❌ | 詳細ログを出力 |
+
+### 日時形式
+
+YYYYMMDDHHmm形式（12桁）で指定します：
+
+- `202501010900` = 2025年1月1日 09:00
+- `202501311700` = 2025年1月31日 17:00
+
+## 運用シナリオ
+
+### 1. データバックアップ
+
+IF-Hubからの定期バックアップ：
+
+```bash
+# 月次バックアップ
+./if-hub-fetcher --equipment Pump01 \
+  --start-date 202501010000 \
+  --end-date 202501312359 \
+  --output-dir ./backup/202501
+```
+
+### 2. 外部システム連携
+
+他システムへのデータ提供：
+
+```bash
+# 分析システム向けデータ抽出
+./if-hub-fetcher --equipment Pump01,Tank01 \
+  --start-date 202501150800 \
+  --end-date 202501151800 \
+  --output-dir ./export_data
+```
+
+### 3. レポート作成
+
+定期レポート用データの抽出：
+
+```bash
+# 日次レポート用データ
+./if-hub-fetcher --equipment Pump01 \
+  --start-date $(date -d 'yesterday' '+%Y%m%d0000') \
+  --end-date $(date -d 'yesterday' '+%Y%m%d2359') \
+  --output-dir ./reports
+```
+
+## 出力形式
+
+データはCSV形式で出力され、ファイル名は自動生成されます：
+
+```
+{設備名}_{開始日時}-{終了日時}.csv
+```
+
+例：
+- `Pump01_20250101_000000-20250131_235900.csv`
+- `Tank01_20250115_080000-20250115_180000.csv`
+
+## エラーハンドリング
+
+### よくあるエラーと対処法
+
+#### 1. IF-Hub接続エラー
+
+```
+❌ Error: Failed to connect to IF-Hub server
+```
+
+**対処法**:
+- IF-Hubコンテナが起動しているか確認
+- ホスト・ポート設定を確認
+
+#### 2. 設備が見つからない
+
+```
+❌ Error: Equipment 'Plant01' not found
+```
+
+**対処法**:
+- 設備名を確認
+- IF-Hubに該当設備のデータが存在するか確認
+
+#### 3. 日時形式エラー
+
+```
+❌ Error: Invalid datetime format
+```
+
+**対処法**:
+- YYYYMMDDHHmm形式（12桁）で指定
+
+## ヘルプとバージョン
+
+```bash
+# ヘルプ表示
+./if-hub-fetcher --help
+
+# バージョン確認
+./if-hub-fetcher --version
+```
+
+## 注意事項
+
+1. **IF-Hub起動必須**: IF-Hubサーバーが稼働している必要があります
+2. **下流処理**: IF-Hubに蓄積済みのデータを抽出します
+3. **ローカル時間**: 入力・出力ともにローカル時間を使用します
+
 ## ライセンス
 
 このツールはIF-HUBプロジェクトの一部です。

@@ -7,13 +7,12 @@ import { DataPoint } from './types/data';
 import { FetcherConfig } from './types/config';
 import { ApiClient } from './api-client';
 import { validateTags } from './tag-validator';
-import { filterDataByConditions } from './filter';
 import { CsvFormatter } from './formatters/csv';
 import { findLatestCsvFile, extractLastTimestampFromCsv } from './io/file';
 import * as path from 'path';
 
 /**
- * コアロジック：データの取得・フィルタリング・出力を行う
+ * コアロジック：データの取得・出力を行う
  * @param params 取得パラメータ
  * @returns 実行結果
  */
@@ -43,12 +42,28 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
     }
     
     // 取得対象のタグリスト
-    const tags = equipmentConfig.tags;
+    let tags = equipmentConfig.tags;
+    
+    // タグが設定されていない場合は、IF-Hub APIから動的取得
     if (tags.length === 0) {
-      return {
-        success: false,
-        error: new Error(`設備 "${equipment}" のタグが設定されていません`)
-      };
+      console.log(`設備 "${equipment}" のタグが設定されていません。IF-Hub APIから動的取得します...`);
+      try {
+        const apiClient = new ApiClient(config.if_hub_api);
+        tags = await apiClient.fetchAvailableTags(equipment);
+        console.log(`動的取得完了: ${tags.length}個のタグを取得しました`);
+        
+        if (tags.length === 0) {
+          return {
+            success: false,
+            error: new Error(`設備 "${equipment}" にタグが存在しません`)
+          };
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: new Error(`設備 "${equipment}" のタグ取得に失敗しました: ${error instanceof Error ? error.message : String(error)}`)
+        };
+      }
     }
     
     // 期間設定の解決
@@ -68,20 +83,13 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
       pageSize: options.page_size || config.if_hub_api.page_size
     });
     
-    // 条件フィルタリング
-    console.log(`取得完了: ${data.length} レコード`);
-    const conditions = equipmentConfig.conditions;
-    let filteredData: DataPoint[] = data;
-    
-    if (conditions) {
-      console.log('条件フィルタリングを適用します...');
-      filteredData = filterDataByConditions(data, conditions);
-      console.log(`フィルタリング後: ${filteredData.length} レコード (${Math.round(filteredData.length / data.length * 100)}%)`);
-    }
+    // データ取得完了ログ
+    const uniqueTimestamps = new Set(data.map(point => point.timestamp));
+    console.log(`取得完了: ${data.length} データポイント (${uniqueTimestamps.size} タイムスタンプ)`);
     
     // ファイル出力
     const formatter = new CsvFormatter(config.output);
-    const outputFiles = await formatter.writeData(equipment, filteredData, start, end);
+    const outputFiles = await formatter.writeData(equipment, data, start, end);
     
     // 処理時間の計算
     const duration = Date.now() - startTime;
@@ -92,7 +100,6 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
       outputFiles,
       stats: {
         totalRecords: data.length,
-        filteredRecords: filteredData.length,
         duration
       }
     };

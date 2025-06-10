@@ -43,7 +43,8 @@ for month in $(seq 1 $MONTHS); do
         --port "$PI_PORT" \
         --start "$month_start" \
         --end "$month_end" \
-        --output "${OUTPUT_BASE}_${month_start:0:7}.csv"
+        --output "${OUTPUT_BASE}_${month_start:0:7}.csv" \
+        --metadata-dir "tag_metadata"
         
     # 取り込み間隔（PI-Serverへの負荷軽減）
     sleep 10

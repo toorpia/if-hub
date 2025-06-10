@@ -16,7 +16,7 @@ export function parseOptions(args: string[]): CliOptions {
   // プログラム情報の設定
   program
     .name(MODULE_NAME)
-    .description('IF-HUBからデータを抽出・条件フィルタリングするツール')
+    .description('IF-HUBからデータを抽出するツール')
     .version(VERSION);
   
   // 必須オプション
@@ -26,43 +26,33 @@ export function parseOptions(args: string[]): CliOptions {
       '設備名 (カンマ区切りで複数指定可能)',
     );
   
+  // 必須オプション  
+  program
+    .requiredOption(
+      '-s, --start-date <datetime>',
+      '開始日時 (YYYYMMDDHHmm形式、例: 202501011400)',
+    );
+
   // オプション引数
   program
     .option(
-      '-t, --tags <names>',
-      'タグ名 (カンマ区切りで複数指定可能、設定ファイルの値を上書き)',
+      '-n, --end-date <datetime>',
+      '終了日時 (YYYYMMDDHHmm形式、省略時は最新データまで)',
     )
     .option(
-      '-s, --start <time>',
-      '開始時刻 (ISO 8601形式: YYYY-MM-DDThh:mm:ssZ)',
+      '--host <host>',
+      'IF-HubのホストIP/ドメイン',
+      'localhost'
     )
     .option(
-      '-n, --end <time>',
-      '終了時刻 (ISO 8601形式: YYYY-MM-DDThh:mm:ssZ)',
+      '-p, --port <number>',
+      'IF-Hubのポート番号',
+      '3001'
     )
     .option(
-      '-l, --latest',
-      '最新データのみ取得 (既存データの最終時刻以降)',
-      false
-    )
-    .option(
-      '-c, --config-file <path>',
-      '設定ファイルのパス',
-      './fetcher/config.yaml'
-    )
-    .option(
-      '-o, --only-when <expression>',
-      '条件式 (例: "Tag1 > 50", カンマ区切りで複数指定可能)',
-    )
-    .option(
-      '-m, --max-rows-per-file <number>',
-      '1ファイルあたりの最大行数',
-      parseIntOption
-    )
-    .option(
-      '-p, --page-size <number>',
-      'APIリクエストの1ページあたりのレコード数',
-      parseIntOption
+      '-o, --output-dir <path>',
+      'CSV出力先ディレクトリ',
+      '.'
     )
     .option(
       '-v, --verbose',
@@ -73,11 +63,17 @@ export function parseOptions(args: string[]): CliOptions {
   // ヘルプテキスト
   program.addHelpText('after', `
 例:
-  $ ./run.sh --equipment Pump01
-  $ ./run.sh --equipment Pump01 --tags Pump01.Temperature,Pump01.Pressure
-  $ ./run.sh --equipment Pump01 --start "2023-01-01T00:00:00Z" --end "2023-01-31T23:59:59Z"
-  $ ./run.sh --equipment Pump01 --latest
-  $ ./run.sh --equipment Pump01 --only-when "Pump01.Status == 1,Pump01.Temperature > 50"
+  # 必須オプションのみ（最新まで）
+  $ if-hub-fetcher --equipment Pump01 --start-date 202501010900
+
+  # 期間指定
+  $ if-hub-fetcher --equipment Pump01,Tank01 --start-date 202501010900 --end-date 202501011700
+
+  # ポート・出力先カスタマイズ
+  $ if-hub-fetcher --equipment Pump01 --start-date 202501010900 --port 3002 --output-dir /custom/path
+
+  # リモートIF-Hub指定
+  $ if-hub-fetcher --equipment Pump01 --start-date 202501010900 --host 192.168.1.100 --port 3001
   `);
   
   // 引数の解析
@@ -85,16 +81,25 @@ export function parseOptions(args: string[]): CliOptions {
   const options = program.opts();
   
   // 複数値の処理（カンマ区切り文字列を配列に変換）
-  if (options.equipment && options.equipment.includes(',')) {
-    options.equipment = options.equipment.split(',');
+  if (options.equipment && typeof options.equipment === 'string' && options.equipment.includes(',')) {
+    options.equipment = options.equipment.split(',').map((s: string) => s.trim());
   }
   
-  if (options.tags && options.tags.includes(',')) {
-    options.tags = options.tags.split(',');
+  // ポート番号を数値に変換
+  if (options.port) {
+    options.port = parseInt(options.port, 10);
+    if (isNaN(options.port)) {
+      throw new Error('ポート番号は数値である必要があります');
+    }
   }
   
-  if (options.onlyWhen && options.onlyWhen.includes(',')) {
-    options.onlyWhen = options.onlyWhen.split(',');
+  // 日時形式のバリデーション
+  if (options.startDate) {
+    validateDateTimeFormat(options.startDate, '--start-date');
+  }
+  
+  if (options.endDate) {
+    validateDateTimeFormat(options.endDate, '--end-date');
   }
   
   return options as CliOptions;
@@ -108,4 +113,55 @@ export function parseOptions(args: string[]): CliOptions {
 function parseIntOption(value: string): number | undefined {
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? undefined : parsed;
+}
+
+/**
+ * YYYYMMDDHHmm形式の日時をバリデーションする
+ * @param value 日時文字列
+ * @param optionName オプション名
+ * @throws バリデーションエラー
+ */
+function validateDateTimeFormat(value: string, optionName: string): void {
+  // YYYYMMDDHHmm形式（12桁）のチェック
+  if (!/^\d{12}$/.test(value)) {
+    throw new Error(`${optionName} は YYYYMMDDHHmm形式（12桁の数字）で指定してください（例: 202501011400）`);
+  }
+  
+  // 各部分を抽出
+  const year = parseInt(value.substring(0, 4), 10);
+  const month = parseInt(value.substring(4, 6), 10);
+  const day = parseInt(value.substring(6, 8), 10);
+  const hour = parseInt(value.substring(8, 10), 10);
+  const minute = parseInt(value.substring(10, 12), 10);
+  
+  // 範囲チェック
+  if (year < 1900 || year > 2100) {
+    throw new Error(`${optionName} の年は1900-2100の範囲で指定してください`);
+  }
+  
+  if (month < 1 || month > 12) {
+    throw new Error(`${optionName} の月は01-12の範囲で指定してください`);
+  }
+  
+  if (day < 1 || day > 31) {
+    throw new Error(`${optionName} の日は01-31の範囲で指定してください`);
+  }
+  
+  if (hour < 0 || hour > 23) {
+    throw new Error(`${optionName} の時は00-23の範囲で指定してください`);
+  }
+  
+  if (minute < 0 || minute > 59) {
+    throw new Error(`${optionName} の分は00-59の範囲で指定してください`);
+  }
+  
+  // 実際の日付として有効かチェック
+  const date = new Date(year, month - 1, day, hour, minute);
+  if (date.getFullYear() !== year || 
+      date.getMonth() !== month - 1 || 
+      date.getDate() !== day ||
+      date.getHours() !== hour ||
+      date.getMinutes() !== minute) {
+    throw new Error(`${optionName} に無効な日時が指定されました: ${value}`);
+  }
 }

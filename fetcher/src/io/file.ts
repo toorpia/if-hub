@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { DataPoint } from '../types/data';
+import { convertUtcToLocal } from '../utils/time-utils';
 
 /**
  * ディレクトリが存在しない場合は作成
@@ -65,7 +66,9 @@ export function generateCsvContent(data: DataPoint[], includeTags: boolean = tru
         return value === null ? '' : value;
       });
       
-      return [timestamp, ...rowValues].join(',');
+      // タイムスタンプをローカル時刻に変換
+      const localTimestamp = convertUtcToLocal(timestamp);
+      return [localTimestamp, ...rowValues].join(',');
     });
 
     return [headerRow, ...rows].join('\n');
@@ -84,10 +87,13 @@ export function generateCsvContent(data: DataPoint[], includeTags: boolean = tru
     
     // データ行
     const rows = sortedData.map(point => {
+      // タイムスタンプをローカル時刻に変換
+      const localTimestamp = convertUtcToLocal(point.timestamp);
+      
       if (includeTags && tagsList.length === 1) {
-        return `${point.timestamp},${point.tag || ''},${point.value === null ? '' : point.value}`;
+        return `${localTimestamp},${point.tag || ''},${point.value === null ? '' : point.value}`;
       } else {
-        return `${point.timestamp},${point.value === null ? '' : point.value}`;
+        return `${localTimestamp},${point.value === null ? '' : point.value}`;
       }
     });
 

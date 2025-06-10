@@ -39,7 +39,35 @@ docker export if-hub > if-hub-export/if-hub-container.tar
 docker export if-hub-pi-ingester > if-hub-export/pi-ingester-container.tar
 ```
 
-#### 1.4 必要なファイルの準備
+#### 1.4 IF-Hub Fetcherバイナリの準備
+
+```bash
+# fetcherディレクトリに移動
+cd fetcher
+
+# 依存関係のインストール
+npm install
+
+# TypeScriptをビルド
+npm run build
+
+# スタンドアロンバイナリを生成
+npm run build:binary
+
+# プロジェクトルートに戻る
+cd ..
+
+# バイナリをif-hub-exportのtoolsディレクトリにコピー
+cp fetcher/dist/bin/if-hub-fetcher if-hub-export/tools/
+
+# 実行権限を付与
+chmod +x if-hub-export/tools/if-hub-fetcher
+
+# バイナリのコピーを確認
+ls -la if-hub-export/tools/if-hub-fetcher
+```
+
+#### 1.5 必要なファイルの準備
 
 ```bash
 # データディレクトリのコピー
@@ -58,6 +86,7 @@ cp -r ingester/tools if-hub-export/  # PI-Ingesterバッチツール
 # 設定スクリプトのコピー
 cp ingester/configure-pi.sh if-hub-export/configure-pi.sh  # PI設定スクリプト
 chmod +x if-hub-export/configure-pi.sh
+
 
 # 全ファイルを圧縮
 tar -czf if-hub-export.tar.gz if-hub-export/
@@ -157,8 +186,9 @@ if-hub-export/
 ├── docker-compose.yml           # 統合サービス定義
 ├── if-hub-container.tar         # IF-Hubコンテナイメージ
 ├── pi-ingester-container.tar    # PI-Ingesterコンテナイメージ
-├── tools/                       # バッチツール
+├── tools/                       # バッチツール（詳細使用方法は tools/README.md を参照）
 │   ├── pi-batch-ingester.py     # PI Systemバッチデータ取得ツール
+│   ├── if-hub-fetcher           # IF-Hub Fetcherバイナリ
 │   ├── README.md                # バッチツール詳細使用方法
 │   ├── equipment.yaml           # サンプル設定ファイル
 │   └── requirements.txt         # 依存関係情報
