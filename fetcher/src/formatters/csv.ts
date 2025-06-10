@@ -10,6 +10,7 @@ import {
   writeDataToCsv,
   extractLastTimestampFromCsv
 } from '../io/file';
+import { convertUtcToLocalForFilename } from '../utils/time-utils';
 
 /**
  * CSVフォーマッタクラス
@@ -68,7 +69,11 @@ export class CsvFormatter {
         await writeDataToCsv(filePath, batch, true);
         outputFiles.push(filePath);
 
-        console.log(`[${i + 1}/${batches.length}] ファイル作成: ${filename} (${batch.length} レコード)`);
+        // CSVの実際の行数を計算（タイムスタンプでグループ化後）
+        const uniqueTimestamps = new Set(batch.map(point => point.timestamp));
+        const actualRows = uniqueTimestamps.size;
+        
+        console.log(`[${i + 1}/${batches.length}] ファイル作成: ${filename} (${batch.length} データポイント → ${actualRows} CSV行)`);
       }
 
       return outputFiles;
@@ -136,19 +141,10 @@ export class CsvFormatter {
   /**
    * ISO形式のタイムスタンプをファイル名用にフォーマット
    * @param isoString ISO 8601形式のタイムスタンプ
-   * @returns フォーマットされたタイムスタンプ
+   * @returns フォーマットされたタイムスタンプ（ローカル時刻）
    */
   private formatTimestamp(isoString: string): string {
-    // 例: '2023-01-01T00:00:00Z' → '20230101_000000'
-    const date = new Date(isoString);
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-
-    return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+    // UTC時刻をローカル時刻に変換してファイル名用フォーマットに
+    return convertUtcToLocalForFilename(isoString);
   }
 }

@@ -36,21 +36,21 @@ export async function validateTags(
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // 設定ファイルのタグをチェック
-    for (const tag of equipmentConfig.tags) {
-      if (!availableTags.includes(tag)) {
-        errors.push(`タグ "${tag}" が設備 "${equipment}" に存在しません`);
+    // 設定ファイルのタグが設定されている場合のみチェック
+    if (equipmentConfig.tags.length > 0) {
+      for (const tag of equipmentConfig.tags) {
+        if (!availableTags.includes(tag)) {
+          errors.push(`タグ "${tag}" が設備 "${equipment}" に存在しません`);
+        }
+      }
+    } else {
+      // タグが設定されていない場合は動的取得モードであることを通知
+      console.log(`設備 "${equipment}" はタグ動的取得モードです (利用可能タグ: ${availableTags.length}件)`);
+      if (availableTags.length === 0) {
+        errors.push(`設備 "${equipment}" に利用可能なタグが存在しません`);
       }
     }
 
-    // 条件で使用されるタグもチェック
-    if (equipmentConfig.conditions?.only_when) {
-      for (const condition of equipmentConfig.conditions.only_when) {
-        if (!availableTags.includes(condition.tag)) {
-          errors.push(`条件で使用されているタグ "${condition.tag}" が設備 "${equipment}" に存在しません`);
-        }
-      }
-    }
 
     return {
       valid: errors.length === 0,
@@ -86,15 +86,4 @@ function getEquipmentConfig(config: FetcherConfig, equipmentName: string): Fetch
 export function getEquipmentTags(config: FetcherConfig, equipmentName: string): string[] {
   const equipment = getEquipmentConfig(config, equipmentName);
   return equipment?.tags || [];
-}
-
-/**
- * 設定から特定の設備の条件を取得する
- * @param config 設定オブジェクト
- * @param equipmentName 設備名
- * @returns 条件設定
- */
-export function getEquipmentConditions(config: FetcherConfig, equipmentName: string): FetcherConfig['equipment'][0]['conditions'] | undefined {
-  const equipment = getEquipmentConfig(config, equipmentName);
-  return equipment?.conditions;
 }

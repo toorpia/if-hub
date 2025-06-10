@@ -4,9 +4,37 @@
  */
 import chalk from 'chalk';
 import { parseOptions } from './options-parser';
-import { loadConfig, fetchData } from '../src';
+import { fetchData } from '../src';
+import { convertLocalToUtc } from '../src/utils/time-utils';
 import { FetcherConfig } from '../src/types/config';
 import { CliOptions } from '../src/types/options';
+
+/**
+ * CLIオプションからデフォルト設定を作成
+ * @param options CLIオプション
+ * @returns FetcherConfig
+ */
+function createConfigFromOptions(options: CliOptions): FetcherConfig {
+  return {
+    equipment: [],
+    output: {
+      format: 'csv' as const,
+      directory: options.outputDir || '.',
+      max_rows_per_file: options.max_rows_per_file || 100000,
+      timestamp_format: 'YYYYMMDD_HHmmss'
+    },
+    if_hub_api: {
+      base_url: `http://${options.host || 'localhost'}:${options.port || 3001}`,
+      timeout: 30000,
+      max_records_per_request: 10000,
+      page_size: options.page_size || 1000
+    },
+    tag_validation: {
+      enabled: true,
+      stop_on_missing_tag: false
+    }
+  };
+}
 
 /**
  * メイン実行関数
@@ -16,8 +44,8 @@ async function main() {
     // コマンドライン引数の解析
     const cliOptions = parseOptions(process.argv);
     
-    // 設定ファイルの読み込み
-    const config = await loadConfig(cliOptions.config_file);
+    // CLIオプションから設定を生成
+    const config = createConfigFromOptions(cliOptions);
     
     // 単一設備の場合
     if (!Array.isArray(cliOptions.equipment)) {
@@ -54,13 +82,21 @@ async function processSingleEquipment(config: FetcherConfig, options: CliOptions
   
   // 実行時オプションの構築
   const runtimeOptions = {
-    start: options.start,
-    end: options.end,
+    start: options.startDate ? convertLocalToUtc(options.startDate) : options.start,
+    end: options.endDate ? convertLocalToUtc(options.endDate) : options.end,
     latest: options.latest,
     max_rows_per_file: options.max_rows_per_file,
     page_size: options.page_size,
     verbose: options.verbose
   };
+  
+  // デバッグ用ログ
+  if (options.startDate) {
+    console.log(chalk.yellow(`時刻変換: ${options.startDate} → ${runtimeOptions.start}`));
+  }
+  if (options.endDate) {
+    console.log(chalk.yellow(`時刻変換: ${options.endDate} → ${runtimeOptions.end}`));
+  }
   
   console.log(chalk.blue(`設備 ${equipment} のデータ取得を開始します...`));
   
@@ -75,7 +111,6 @@ async function processSingleEquipment(config: FetcherConfig, options: CliOptions
   if (result.success) {
     console.log(chalk.green('✅ 処理が完了しました'));
     console.log(`  取得レコード数: ${chalk.yellow(result.stats?.totalRecords.toString())}`);
-    console.log(`  フィルタリング後: ${chalk.yellow(result.stats?.filteredRecords.toString())}`);
     console.log(`  処理時間: ${chalk.yellow((result.stats?.duration || 0) / 1000)} 秒`);
     console.log(`  出力ファイル数: ${chalk.yellow(result.outputFiles?.length.toString() || '0')}`);
     
@@ -120,32 +155,6 @@ function overrideConfig(config: FetcherConfig, options: CliOptions): FetcherConf
     }
   }
   
-  // only_when条件の上書き
-  if (options.only_when) {
-    if (!equipmentConfig.conditions) {
-      equipmentConfig.conditions = { only_when: [] };
-    }
-    
-    if (!equipmentConfig.conditions.only_when) {
-      equipmentConfig.conditions.only_when = [];
-    }
-    
-    // 既存の条件をクリア
-    equipmentConfig.conditions.only_when = [];
-    
-    // 新しい条件を追加
-    const conditions = Array.isArray(options.only_when) ? options.only_when : [options.only_when];
-    for (const condStr of conditions) {
-      const match = condStr.match(/^([^ ]+)\s+([<>=!]{1,2})\s+(.+)$/);
-      if (match) {
-        const [, tag, operator, valueStr] = match;
-        equipmentConfig.conditions.only_when.push({
-          tag,
-          condition: `${operator} ${valueStr}`
-        });
-      }
-    }
-  }
   
   // 出力設定の上書き
   if (options.max_rows_per_file) {

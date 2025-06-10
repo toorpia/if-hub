@@ -12,16 +12,6 @@ export interface FetcherConfig {
 export interface EquipmentConfig {
   name: string;
   tags: string[];
-  conditions?: ConditionsConfig;
-}
-
-export interface ConditionsConfig {
-  only_when?: FilterCondition[];
-}
-
-export interface FilterCondition {
-  tag: string;
-  condition: string;
 }
 
 export interface OutputConfig {

@@ -32,7 +32,8 @@ for config_file in configs/equipments/*/config.yaml; do
             --port "$PI_PORT" \
             --start "$START_DATE" \
             --end "$END_DATE" \
-            --output "static_equipment_data/${equipment_name}.csv"
+            --output "static_equipment_data/${equipment_name}.csv" \
+            --metadata-dir "tag_metadata"
         
         # PI-Serverへの負荷軽減のため間隔をあける
         sleep 5

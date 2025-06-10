@@ -64,16 +64,36 @@ export interface CliOptions extends RuntimeOptions {
   equipment: string | string[];
   
   /**
+   * 開始日付（YYYY-MM-DD形式）
+   */
+  startDate: string;
+  
+  /**
+   * 終了日付（YYYY-MM-DD形式、省略可能）
+   */
+  endDate?: string;
+  
+  /**
+   * IF-HubのホストIP/ドメイン
+   */
+  host?: string;
+  
+  /**
+   * IF-Hubのポート番号
+   */
+  port?: number;
+  
+  /**
+   * CSV出力先ディレクトリ
+   */
+  outputDir?: string;
+  
+  /**
    * タグ名（カンマ区切りで複数指定可能）
    * 設定ファイルの値を上書き
    */
   tags?: string | string[];
   
-  /**
-   * 条件式（フィルタリング）
-   * 設定ファイルの値を上書き
-   */
-  only_when?: string | string[];
 }
 
 /**
@@ -85,7 +105,6 @@ export interface FetcherResult {
   error?: Error;
   stats?: {
     totalRecords: number;
-    filteredRecords: number;
     duration: number;
   };
 }
