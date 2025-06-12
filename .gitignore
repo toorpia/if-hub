@@ -91,6 +91,17 @@ test/output/
 # Test data files
 ingester/test_output/
 
+# Offline deployment large files
+offline-deployment/if-hub/*.tar
+offline-deployment/*.tgz
+offline-deployment/if-hub/*
+!offline-deployment/if-hub/tools/
+!offline-deployment/if-hub/scripts/
+!offline-deployment/if-hub/configure-pi.sh
+!offline-deployment/if-hub/setup.sh
+!offline-deployment/if-hub/docker-compose.yml
+!offline-deployment/if-hub/init_db/
+
 # temporary files
 equipment.csv
 equipment.zip
