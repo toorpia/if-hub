@@ -92,6 +92,7 @@ offline-deployment/if-hub/*
 !offline-deployment/if-hub/setup.sh
 !offline-deployment/if-hub/docker-compose.yml
 !offline-deployment/if-hub/init_db/
+offline-deployment/if-hub/tools/if-hub-fetcher
 
 # temporary files
 equipment.csv
