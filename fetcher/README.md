@@ -26,6 +26,7 @@ dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" --verbose
 - 設備単位でのデータ抽出
 - 期間指定でのデータ取得
 - 複数設備の一括取得
+- 条件フィルタリング（特定タグの数値条件に基づくデータ抽出）
 - ローカル時間ベースのファイル命名とCSV出力
 - リモートIF-Hubサーバーへの接続対応
 
@@ -66,6 +67,67 @@ dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" --port 30
 dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" --host 192.168.1.100 --port 3001
 ```
 
+### 条件フィルタリング
+
+条件フィルタリング機能を使用すると、特定のタグ値が条件を満たす時刻のデータのみを抽出できます。
+
+#### フィルタ条件の記法
+
+```bash
+# 基本形：タグ名 演算子 値
+--filter "Pump01|Temperature > 50"
+--filter "Pump01.Temperature > 50"
+
+# 設備名省略形式（--equipmentで指定した設備のタグ）
+--filter "Temperature > 50"
+
+# 複数条件：論理演算子（AND/OR）で結合
+--filter "Pump01|Temperature > 50 AND Pump01|Flow <= 100"
+--filter "Temperature >= 50 AND Pump01|Flow <= 100"
+--filter "Tank01.Level >= 80 OR Tank01.Level <= 20"
+```
+
+#### 対応演算子
+
+| 演算子 | 説明       | 例                        |
+|--------|------------|---------------------------|
+| `>`    | より大きい | `Temperature > 50`        |
+| `>=`   | 以上       | `Level >= 80`             |
+| `<`    | より小さい | `Flow < 100`              |
+| `<=`   | 以下       | `Pressure <= 5.0`         |
+| `==`   | 等しい     | `Status == 1`             |
+| `!=`   | 等しくない | `ErrorCode != 0`          |
+
+#### 論理演算子
+
+| 演算子 | 説明                   | 例                                        |
+|--------|------------------------|-------------------------------------------|
+| `AND`  | すべての条件を満たす   | `Temperature > 50 AND Flow <= 100`       |
+| `OR`   | いずれかの条件を満たす | `Level >= 80 OR Level <= 20`             |
+
+#### フィルタリングの使用例
+
+```bash
+# 温度が50度以上の時刻のデータのみ取得
+dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" \
+  --filter "Pump01.Temperature > 50"
+
+# 複数条件：温度50度以上かつ流量100以下
+dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" \
+  --filter "Pump01.Temperature > 50 AND Pump01.Flow <= 100"
+
+# OR条件：レベルが高すぎるか低すぎる時
+dist/bin/if-hub-fetcher --equipment Tank01 --start-date "202301010000" \
+  --filter "Tank01.Level >= 80 OR Tank01.Level <= 20"
+```
+
+#### 注意事項
+
+- フィルタ条件に使用するタグは、指定した設備に含まれている必要があります
+- フィルタ条件に必要なタグが設備の設定に含まれていない場合、自動的に追加して取得されます
+- 条件を満たさないタイムスタンプのデータは出力されません
+- フィルタ処理は取得後に実行されるため、大量データの場合は時間がかかる場合があります
+
 ### コマンドラインオプション
 
 | オプション                   | 説明                                               |
@@ -73,6 +135,7 @@ dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" --host 19
 | `-e, --equipment <name>`   | 設備名（必須、カンマ区切りで複数指定可能）          |
 | `-s, --start-date <time>`  | 開始時刻（必須、YYYYMMDDHHmm形式、ローカル時刻）   |
 | `-n, --end-date <time>`    | 終了時刻（YYYYMMDDHHmm形式、ローカル時刻）         |
+| `--filter <expression>`   | 条件フィルタリング（例: "Pump01.Temperature > 50 AND Pump01.Flow <= 100"） |
 | `--host <host>`            | IF-HubのホストIP/ドメイン（デフォルト: localhost） |
 | `-p, --port <number>`      | IF-Hubのポート番号（デフォルト: 3001）            |
 | `-o, --output-dir <path>`  | CSV出力先ディレクトリ（デフォルト: .）            |
@@ -92,6 +155,11 @@ dist/bin/if-hub-fetcher --equipment Pump01 --start-date "202301010000" --host 19
 │   ├── types/                # 型定義
 │   ├── io/                   # I/O処理
 │   ├── formatters/           # 出力フォーマッタ
+│   ├── filter/               # 条件フィルタリング
+│   │   ├── types.ts          # フィルタリング用型定義
+│   │   ├── parser.ts         # 条件式パーサー
+│   │   ├── engine.ts         # フィルタリングエンジン
+│   │   └── index.ts          # エクスポート
 │   ├── api-client.ts         # APIクライアント
 │   ├── tag-validator.ts      # タグ検証
 │   ├── fetcher.ts            # コアロジック

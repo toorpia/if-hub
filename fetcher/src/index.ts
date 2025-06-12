@@ -25,6 +25,9 @@ export * from './types/config';
 export * from './types/data';
 export * from './types/options';
 
+// フィルタリング機能をエクスポート
+export * from './filter';
+
 /**
  * メインモジュール情報
  */

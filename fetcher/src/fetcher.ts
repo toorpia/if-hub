@@ -9,6 +9,7 @@ import { ApiClient } from './api-client';
 import { validateTags } from './tag-validator';
 import { CsvFormatter } from './formatters/csv';
 import { findLatestCsvFile, extractLastTimestampFromCsv } from './io/file';
+import { parseFilterExpression, extractTagNames, filterData, generateFilterStats, validateRequiredTags } from './filter';
 import * as path from 'path';
 
 /**
@@ -21,6 +22,24 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
   const startTime = Date.now();
   
   try {
+    // フィルタ条件の解析（早期に実行してエラーチェック）
+    let filterExpression = null;
+    let filterRequiredTags: string[] = [];
+    
+    if ('filter' in options && options.filter) {
+      try {
+        filterExpression = parseFilterExpression(options.filter, equipment);
+        filterRequiredTags = extractTagNames(filterExpression);
+        console.log(`フィルタ条件: ${options.filter}`);
+        console.log(`フィルタ必要タグ: ${filterRequiredTags.join(', ')}`);
+      } catch (error) {
+        return {
+          success: false,
+          error: new Error(`フィルタ条件の解析に失敗しました: ${error instanceof Error ? error.message : String(error)}`)
+        };
+      }
+    }
+    
     // 整合性検証
     if (config.tag_validation?.enabled !== false) {
       const validationResult = await validateTags(config, equipment);
@@ -66,6 +85,13 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
       }
     }
     
+    // フィルタに必要なタグを追加
+    if (filterRequiredTags.length > 0) {
+      const allTags = new Set([...tags, ...filterRequiredTags]);
+      tags = Array.from(allTags);
+      console.log(`フィルタ条件により追加タグを含めて取得: ${tags.length}タグ`);
+    }
+    
     // 期間設定の解決
     const { start, end } = await resolvePeriod(config, equipment, options);
     console.log(`取得期間: ${start || '最古'} から ${end || '最新'}`);
@@ -75,7 +101,7 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
     
     // データ取得（ページング処理付き）
     console.log(`設備 ${equipment} のタグデータ取得を開始します (${tags.length}タグ)`);
-    const data = await apiClient.fetchWithPagination({
+    let data = await apiClient.fetchWithPagination({
       equipment,
       tags,
       start,
@@ -86,6 +112,25 @@ export async function fetchData(params: FetcherParams): Promise<FetcherResult> {
     // データ取得完了ログ
     const uniqueTimestamps = new Set(data.map(point => point.timestamp));
     console.log(`取得完了: ${data.length} データポイント (${uniqueTimestamps.size} タイムスタンプ)`);
+    
+    // フィルタリング処理
+    let originalDataCount = data.length;
+    if (filterExpression) {
+      // フィルタに必要なタグの存在確認
+      const missingTags = validateRequiredTags(data, filterRequiredTags);
+      if (missingTags.length > 0) {
+        console.warn(`警告: フィルタに必要なタグが見つかりません: ${missingTags.join(', ')}`);
+        console.warn('フィルタ条件を満たすデータは存在しない可能性があります');
+      }
+      
+      // フィルタリング実行
+      console.log('フィルタリング処理を開始します...');
+      data = filterData(data, filterExpression);
+      
+      // フィルタリング結果のログ
+      const filterStats = generateFilterStats(originalDataCount, data.length);
+      console.log(filterStats);
+    }
     
     // ファイル出力
     const formatter = new CsvFormatter(config.output);
