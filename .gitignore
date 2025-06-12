@@ -76,15 +76,6 @@ tag_metadata/*.csv
 plan.md
 cm.txt
 
-# working directory to export
-if-hub-export/*
-
-# 重要ファイルは例外的に含める
-!if-hub-export/tools/
-!if-hub-export/scripts/
-!if-hub-export/configure-pi.sh
-!if-hub-export/setup.sh
-!if-hub-export/docker-compose.yml
 
 test/output/
 
