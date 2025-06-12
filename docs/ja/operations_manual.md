@@ -454,7 +454,8 @@ npm run build
 ./run.sh --equipment Pump01 --latest
 
 # 条件付き取得（温度が50度より大きい場合のみ）
-./run.sh --equipment Pump01 --only-when "Pump01.Temperature > 50"
+./run.sh --equipment Pump01 --filter "Pump01|Temperature > 50"
+./run.sh --equipment Pump01 --filter "Temperature > 50"
 ```
 
 #### 設定ファイル管理

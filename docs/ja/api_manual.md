@@ -1029,7 +1029,17 @@ Fetcher → IF-HUB API → データベース → APIレスポンス → CSV出�
 
 Fetcherの`only_when`構文は、以下のAPIパターンを使用してデータをフィルタリングします：
 
-**例: 温度が50度以上の時間帯のみのデータ取得**
+```
+equipment:
+  - name: Pump01
+    tags:
+      - Pump01.Flow
+      - Pump01.Temperature
+    conditions:
+      only_when:
+        - tag: Pump01.Temperature
+          condition: "> 45"
+```
 
 1. **条件判定用データの取得:**
    ```

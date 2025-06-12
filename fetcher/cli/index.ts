@@ -85,6 +85,7 @@ async function processSingleEquipment(config: FetcherConfig, options: CliOptions
     start: options.startDate ? convertLocalToUtc(options.startDate) : options.start,
     end: options.endDate ? convertLocalToUtc(options.endDate) : options.end,
     latest: options.latest,
+    filter: options.filter,
     max_rows_per_file: options.max_rows_per_file,
     page_size: options.page_size,
     verbose: options.verbose

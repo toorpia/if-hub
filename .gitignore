@@ -95,3 +95,4 @@ ingester/test_output/
 equipment.csv
 equipment.zip
 error.log
+.clinerules/

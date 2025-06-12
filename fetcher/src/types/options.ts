@@ -24,6 +24,12 @@ export interface RuntimeOptions {
   latest?: boolean;
   
   /**
+   * 条件フィルタリング式
+   * 例: "Pump01.Temperature > 50 AND Pump01.Flow <= 100"
+   */
+  filter?: string;
+  
+  /**
    * 1ファイルあたりの最大行数
    * デフォルト値はconfig.yamlで設定
    */

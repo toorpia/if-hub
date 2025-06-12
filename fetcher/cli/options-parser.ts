@@ -40,6 +40,10 @@ export function parseOptions(args: string[]): CliOptions {
       '終了日時 (YYYYMMDDHHmm形式、省略時は最新データまで)',
     )
     .option(
+      '--filter <expression>',
+      '条件フィルタリング (例: "Pump01|Temperature > 50 AND Pump01|Flow <= 100")',
+    )
+    .option(
       '--host <host>',
       'IF-HubのホストIP/ドメイン',
       'localhost'
@@ -68,6 +72,15 @@ export function parseOptions(args: string[]): CliOptions {
 
   # 期間指定
   $ if-hub-fetcher --equipment Pump01,Tank01 --start-date 202501010900 --end-date 202501011700
+
+  # 条件フィルタリング（単一条件）
+  $ if-hub-fetcher --equipment Pump01 --start-date 202501010900 --filter "Pump01|Temperature > 50"
+
+  # 条件フィルタリング（複数条件）
+  $ if-hub-fetcher --equipment Pump01 --start-date 202501010900 --filter "Pump01|Temperature > 50 AND Pump01|Flow <= 100"
+
+  # PIタグ名にピリオドが含まれる場合（パイプ区切り必須）
+  $ if-hub-fetcher --equipment 7th-untan --start-date 202501010900 --filter "7th-untan|POW:7I1032.PV > 120"
 
   # ポート・出力先カスタマイズ
   $ if-hub-fetcher --equipment Pump01 --start-date 202501010900 --port 3002 --output-dir /custom/path
