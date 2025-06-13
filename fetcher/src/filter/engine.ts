@@ -71,6 +71,15 @@ export function filterData(data: DataPoint[], expression: FilterExpression): Dat
     return [];
   }
 
+  // 全タグのリストを取得
+  const allTags = new Set<string>();
+  for (const point of data) {
+    if (point.tag) {
+      allTags.add(point.tag);
+    }
+  }
+  const allTagsList = Array.from(allTags);
+
   // データポイントをタイムスタンプ別にグループ化
   const timestampGroups = groupDataByTimestamp(data);
   
@@ -83,8 +92,25 @@ export function filterData(data: DataPoint[], expression: FilterExpression): Dat
     }
   }
   
-  // 条件を満たすタイムスタンプのデータのみを抽出
-  return data.filter(point => validTimestamps.has(point.timestamp));
+  // 条件を満たすタイムスタンプについて、全タグのデータを生成
+  // 重要：データが存在しないタグについてもnull値で補完
+  const result: DataPoint[] = [];
+  
+  for (const timestamp of validTimestamps) {
+    const tagValues = timestampGroups[timestamp] || {};
+    
+    for (const tag of allTagsList) {
+      const value = tagValues[tag] !== undefined ? tagValues[tag] : null;
+      result.push({
+        timestamp,
+        tag,
+        value,
+        equipment: data.find(p => p.tag === tag)?.equipment
+      });
+    }
+  }
+  
+  return result;
 }
 
 /**
