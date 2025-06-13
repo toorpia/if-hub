@@ -37,7 +37,7 @@ for month in $(seq 1 $MONTHS); do
     
     echo "取り込み中: $month_start から $month_end"
     
-    python tools/pi-batch-ingester.py \
+    python3 tools/pi-batch-ingester.py \
         --config "$CONFIG_FILE" \
         --host "$PI_HOST" \
         --port "$PI_PORT" \
