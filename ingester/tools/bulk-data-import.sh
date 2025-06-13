@@ -22,12 +22,21 @@ fi
 
 # 設備名を抽出
 EQUIPMENT_NAME=$(basename $(dirname $CONFIG_FILE))
-OUTPUT_BASE="static_equipment_data/${EQUIPMENT_NAME}"
+
+# 一時ディレクトリの設定と作成
+TEMP_DIR="ingester/temp"
+mkdir -p "$TEMP_DIR"
+
+# 一時ファイル用パス
+TEMP_OUTPUT_BASE="${TEMP_DIR}/${EQUIPMENT_NAME}"
+# 最終出力先パス
+FINAL_OUTPUT_BASE="static_equipment_data/${EQUIPMENT_NAME}"
 
 echo "=== 大量データの分割取り込み ==="
 echo "設備: $EQUIPMENT_NAME"
 echo "開始日: $START_DATE"
 echo "期間: ${MONTHS}ヶ月"
+echo "一時ディレクトリ: $TEMP_DIR"
 echo ""
 
 # 月単位で分割取り込み
@@ -45,20 +54,29 @@ for month in $(seq 1 $MONTHS); do
         --port "$PI_PORT" \
         --start "$month_start" \
         --end "$month_end" \
-        --output "${OUTPUT_BASE}_${month_start:0:7}.csv" \
+        --output "${TEMP_OUTPUT_BASE}_${month_start:0:7}.csv" \
         --metadata-dir "tag_metadata"
         
     # 取り込み間隔（PI-Serverへの負荷軽減）
     sleep 60
 done
 
-# 個別ファイルを統合
+# 個別ファイルを統合（一時ディレクトリ内で実行）
 echo ""
-echo "ファイルを統合中..."
-if ls ${OUTPUT_BASE}_20*.csv 1> /dev/null 2>&1; then
-    cat ${OUTPUT_BASE}_20*.csv > ${OUTPUT_BASE}.csv
-    rm ${OUTPUT_BASE}_20*.csv
-    echo "✅ 統合完了: ${OUTPUT_BASE}.csv"
+echo "ファイルを統合中（一時ディレクトリ内）..."
+if ls ${TEMP_OUTPUT_BASE}_20*.csv 1> /dev/null 2>&1; then
+    # 一時ディレクトリ内で統合
+    cat ${TEMP_OUTPUT_BASE}_20*.csv > "${TEMP_OUTPUT_BASE}.csv"
+    
+    # アトミック移動: 完成したファイルのみをstatic_equipment_data/に移動
+    echo "完成ファイルをstatic_equipment_data/に移動中..."
+    mv "${TEMP_OUTPUT_BASE}.csv" "${FINAL_OUTPUT_BASE}.csv"
+    
+    # 一時ファイルのクリーンアップ
+    rm ${TEMP_OUTPUT_BASE}_20*.csv
+    
+    echo "✅ 統合完了: ${FINAL_OUTPUT_BASE}.csv"
+    echo "✅ 一時ファイル削除完了"
 else
-    echo "❌ 統合対象ファイルが見つかりません"
+    echo "❌ 統合対象ファイルが見つかりません: ${TEMP_OUTPUT_BASE}_20*.csv"
 fi
