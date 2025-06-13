@@ -87,7 +87,6 @@ offline-deployment/if-hub/*.tar
 offline-deployment/*.tgz
 offline-deployment/if-hub/*
 !offline-deployment/if-hub/tools/
-!offline-deployment/if-hub/scripts/
 !offline-deployment/if-hub/configure-pi.sh
 !offline-deployment/if-hub/setup.sh
 !offline-deployment/if-hub/docker-compose.yml
