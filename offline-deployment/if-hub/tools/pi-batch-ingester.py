@@ -28,7 +28,8 @@ class PIBatchIngester:
     """PI System バッチデータ取得クラス"""
     
     def __init__(self, equipment_config_path: str, pi_host: str, pi_port: int, 
-                 timeout: int = 30000, max_retries: int = 3, retry_interval: int = 5000):
+                 timeout: int = 30000, max_retries: int = 3, retry_interval: int = 5000,
+                 metadata_dir: Optional[str] = None):
         """
         初期化
         
@@ -39,6 +40,7 @@ class PIBatchIngester:
             timeout: タイムアウト（ミリ秒）
             max_retries: 最大リトライ回数
             retry_interval: リトライ間隔（ミリ秒）
+            metadata_dir: メタデータ保存ディレクトリ
         """
         self.equipment_config_path = Path(equipment_config_path)
         self.equipment_config = self._load_equipment_config()
@@ -50,6 +52,7 @@ class PIBatchIngester:
             'retry_interval': retry_interval
         }
         self.equipment_name = self._extract_equipment_name()
+        self.metadata_dir = Path(metadata_dir) if metadata_dir else None
         
     def _parse_simple_yaml(self, content: str) -> Dict[str, Any]:
         """簡単なYAMLパーサー（標準ライブラリのみ使用）"""
@@ -247,6 +250,143 @@ class PIBatchIngester:
                     print(f"⏳ Retrying in {retry_interval}s...")
                     time.sleep(retry_interval)
     
+    def extract_metadata_from_csv(self, csv_data: str) -> List[Dict[str, str]]:
+        """PI-APIから取得したCSVデータからメタデータを抽出"""
+        lines = csv_data.split('\n')
+        
+        if len(lines) < 3:
+            raise ValueError('CSV data does not contain required metadata rows')
+        
+        # 最初の3行からメタデータを抽出
+        source_tags = [tag.strip() for tag in lines[0].split(',')]
+        display_names = [name.strip() for name in lines[1].split(',')]
+        units = [unit.strip() for unit in lines[2].split(',')]
+        
+        # 最初のカラム（datetime/timestamp）をスキップ
+        metadata = []
+        for i in range(1, len(source_tags)):
+            if i < len(display_names) and i < len(units):
+                if source_tags[i] and display_names[i] and units[i]:
+                    metadata.append({
+                        'source_tag': source_tags[i],
+                        'display_name': display_names[i],
+                        'unit': units[i]
+                    })
+        
+        print(f"📋 Extracted metadata for {len(metadata)} tags")
+        return metadata
+    
+    def load_existing_translations(self, language_code: str = 'ja') -> List[Dict[str, str]]:
+        """既存のtranslationsファイルを読み込み"""
+        if not self.metadata_dir:
+            return []
+        
+        filename = f"translations_{language_code}.csv"
+        file_path = self.metadata_dir / filename
+        
+        try:
+            if not file_path.exists():
+                print(f"Translations file does not exist: {file_path}")
+                return []
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            lines = content.strip().split('\n')
+            if len(lines) <= 1:
+                return []  # ヘッダーのみまたは空ファイル
+            
+            metadata = []
+            # ヘッダー行をスキップして読み込み
+            for i in range(1, len(lines)):
+                columns = [col.strip() for col in lines[i].split(',')]
+                if len(columns) >= 3:
+                    metadata.append({
+                        'source_tag': columns[0],
+                        'display_name': columns[1],
+                        'unit': columns[2]
+                    })
+            
+            print(f"📋 Loaded {len(metadata)} existing translations from {filename}")
+            return metadata
+            
+        except Exception as e:
+            print(f"⚠️  Failed to load existing translations from {file_path}: {e}")
+            return []
+    
+    def save_metadata_to_translations(self, new_metadata: List[Dict[str, str]], language_code: str = 'ja') -> None:
+        """新しいメタデータを既存のtranslationsファイルに保存"""
+        if not self.metadata_dir or not new_metadata:
+            return
+        
+        filename = f"translations_{language_code}.csv"
+        file_path = self.metadata_dir / filename
+        
+        try:
+            # 出力ディレクトリを作成
+            self.metadata_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 既存のメタデータを読み込み
+            existing_metadata = self.load_existing_translations(language_code)
+            
+            # 重複チェック：既存のsource_tagセットを作成
+            existing_tags = {meta['source_tag'] for meta in existing_metadata}
+            
+            # 新規のメタデータのみを抽出
+            new_entries = [meta for meta in new_metadata if meta['source_tag'] not in existing_tags]
+            
+            if not new_entries:
+                print(f"📋 No new metadata to add to {filename}")
+                return
+            
+            print(f"📋 Adding {len(new_entries)} new entries to {filename}")
+            
+            # 全体のメタデータを結合
+            all_metadata = existing_metadata + new_entries
+            
+            # CSVファイルを生成
+            csv_lines = ['source_tag,display_name,unit']  # ヘッダー
+            csv_lines.extend([
+                f"{meta['source_tag']},{meta['display_name']},{meta['unit']}"
+                for meta in all_metadata
+            ])
+            
+            csv_content = '\n'.join(csv_lines) + '\n'
+            
+            # 一時ファイルに書き込み、その後アトミックにrename
+            temp_path = file_path.with_suffix(f'.tmp.{int(time.time())}')
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(csv_content)
+            
+            temp_path.rename(file_path)
+            
+            print(f"✅ Successfully updated {filename} with {len(new_entries)} new entries")
+            print(f"   File size: {file_path.stat().st_size} bytes, Total entries: {len(all_metadata)}")
+            
+        except Exception as e:
+            print(f"❌ Failed to update translations file {file_path}: {e}")
+            raise
+    
+    def process_raw_csv_to_ifhub_format(self, csv_data: str) -> str:
+        """PI-APIから取得したCSVデータを加工してIF-HUB形式に変換"""
+        lines = csv_data.split('\n')
+        
+        if len(lines) < 4:
+            raise ValueError('CSV data does not contain enough rows for processing')
+        
+        # 1行目（ヘッダー）と4行目以降（データ）のみを保持
+        processed_lines = [lines[0]] + lines[3:]
+        
+        # 空行を除去
+        filtered_lines = [line for line in processed_lines if line.strip()]
+        
+        result = '\n'.join(filtered_lines)
+        
+        data_rows = len(filtered_lines) - 1 if filtered_lines and filtered_lines[0] else len(filtered_lines)
+        print(f"📋 Processed CSV: {len(filtered_lines)} lines (removed metadata rows), {data_rows} data rows")
+        
+        return result
+    
     def save_csv(self, data: str, output_path: str) -> None:
         """CSVデータをファイルに保存"""
         output_file = Path(output_path)
@@ -279,13 +419,35 @@ class PIBatchIngester:
         print(f"   Period: {start_date} to {end_date}")
         print(f"   Output: {output_path}")
         print(f"   Tags: {len(self.get_source_tags())} tags")
+        if self.metadata_dir:
+            print(f"   Metadata dir: {self.metadata_dir}")
         print()
         
         # データ取得
-        csv_data = self.fetch_data(start_date, end_date)
+        raw_csv_data = self.fetch_data(start_date, end_date)
         
-        # ファイル保存
-        self.save_csv(csv_data, output_path)
+        # メタデータ処理（metadata_dirが設定されている場合）
+        if self.metadata_dir:
+            try:
+                # メタデータを抽出
+                metadata = self.extract_metadata_from_csv(raw_csv_data)
+                
+                # メタデータをtranslationsファイルに保存
+                self.save_metadata_to_translations(metadata)
+                
+                # データ部分のみを抽出してIF-Hub形式に変換
+                processed_csv_data = self.process_raw_csv_to_ifhub_format(raw_csv_data)
+                
+                # 処理済みCSVを保存
+                self.save_csv(processed_csv_data, output_path)
+                
+            except Exception as e:
+                print(f"⚠️  Metadata processing failed: {e}")
+                print("   Saving raw CSV data instead...")
+                self.save_csv(raw_csv_data, output_path)
+        else:
+            # メタデータ処理なし（従来通り）
+            self.save_csv(raw_csv_data, output_path)
         
         print()
         print("✅ Batch processing completed successfully!")
@@ -326,6 +488,8 @@ def main():
                        help='End datetime (e.g., "2025-01-31", "2025-01-31 23:59:59")')
     parser.add_argument('-o', '--output', default=None,
                        help='Output CSV file path (default: ./{equipment_name}.csv)')
+    parser.add_argument('--metadata-dir', default=None,
+                       help='Metadata output directory for tag translations (CSV format)')
     parser.add_argument('--timeout', type=int, default=30000,
                        help='Request timeout in milliseconds (default: 30000)')
     parser.add_argument('--retries', type=int, default=3,
@@ -345,7 +509,8 @@ def main():
             pi_port=args.port,
             timeout=args.timeout,
             max_retries=args.retries,
-            retry_interval=args.retry_interval
+            retry_interval=args.retry_interval,
+            metadata_dir=args.metadata_dir
         )
         
         # 日時をパース
