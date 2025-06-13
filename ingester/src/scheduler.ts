@@ -129,9 +129,6 @@ export class DataIngestionScheduler {
       if (response.success && response.data) {
         console.log(`Received CSV data from PI-API: ${response.data.split('\n').length} lines`);
 
-        // 実際に取得したデータの時刻範囲を抽出
-        const { actualStartTime, actualEndTime } = this.extractActualDataTimeRange(response.data);
-
         // ファイル出力（自動ファイル名: {設備名}.csv）
         const outputFilename = `${equipmentName}.csv`;
         
@@ -145,9 +142,11 @@ export class DataIngestionScheduler {
         // 成功状態を記録
         this.stateManager.updateFetchSuccess(equipmentKey, fetchTime);
 
-        // 実際に取得したデータの最新時刻を記録（境界欠落防止）
-        if (actualEndTime) {
-          this.stateManager.updateActualDataTime(equipmentKey, actualEndTime);
+        // 実際にCSVファイルに保存されたデータの最新時刻を記録（境界欠落防止）
+        const actualLastTime = this.csvOutput.getLastTimestampFromFile(outputFilename);
+        if (actualLastTime) {
+          this.stateManager.updateActualDataTime(equipmentKey, actualLastTime);
+          console.log(`📊 Updated actual data time for ${equipmentKey}: ${actualLastTime.toISOString()}`);
         }
 
         // Gap処理：接続成功時は保留中のGapをクリア
@@ -342,63 +341,6 @@ export class DataIngestionScheduler {
     console.log('Scheduler stopped');
   }
 
-  /**
-   * CSVデータから実際のデータの時刻範囲を抽出
-   */
-  private extractActualDataTimeRange(csvData: string): { actualStartTime?: Date; actualEndTime?: Date } {
-    try {
-      const lines = csvData.split('\n').filter(line => line.trim());
-      
-      if (lines.length <= 1) {
-        return {}; // ヘッダーのみまたは空データ
-      }
-
-      const headers = lines[0].split(',');
-      
-      // タイムスタンプ列を特定
-      const timestampIndex = headers.findIndex(h => 
-        h.toLowerCase().includes('time') || h.toLowerCase().includes('date')
-      );
-
-      if (timestampIndex === -1) {
-        console.warn('No timestamp column found in CSV data');
-        return {};
-      }
-
-      let earliestTime: Date | undefined;
-      let latestTime: Date | undefined;
-
-      // データ行を処理
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',');
-        if (cols[timestampIndex] && cols[timestampIndex].trim()) {
-          try {
-            const time = new Date(cols[timestampIndex].trim());
-            
-            if (!isNaN(time.getTime())) {
-              if (!earliestTime || time < earliestTime) {
-                earliestTime = time;
-              }
-              if (!latestTime || time > latestTime) {
-                latestTime = time;
-              }
-            }
-          } catch (error) {
-            // 無効な日付をスキップ
-            continue;
-          }
-        }
-      }
-
-      return {
-        actualStartTime: earliestTime,
-        actualEndTime: latestTime,
-      };
-    } catch (error) {
-      console.error('Failed to extract data time range from CSV:', error);
-      return {};
-    }
-  }
 
   /**
    * スケジューラーの状態を取得
