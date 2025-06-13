@@ -6,6 +6,17 @@
 
 - ツール名: `create-package.sh`
 
+### InstallされるScript 
+
+パッケージ作成時に、以下のディレクトリから自動的にツールを収集し、配布パッケージに統合します：
+
+| 収集元 | 収集対象 | 配布先 | 説明 |
+|--------|----------|--------|------|
+| `tools/` | `*.sh` | `offline-deployment/if-hub/tools/` | プロジェクト共通の運用・監視ツール |
+| `ingester/tools/` | `*.py`, `*.sh`, `*.md` | `offline-deployment/if-hub/tools/` | PI関連の取り込み・設定ツール |
+| `fetcher/dist/bin/` | `if-hub-fetcher` | `offline-deployment/if-hub/tools/` | IF-Hubからのデータ抽出バイナリ |
+
+
 ### 自動判定機能
 
 このスクリプトは以下を自動判定してパッケージタイプを決定します：
