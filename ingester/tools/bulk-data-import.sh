@@ -33,9 +33,11 @@ echo ""
 # 月単位で分割取り込み
 for month in $(seq 1 $MONTHS); do
     month_start=$(date -d "$START_DATE +$((month-1)) month" '+%Y-%m-01')
-    month_end=$(date -d "$month_start +1 month -1 day" '+%Y-%m-%d')
+    # 修正: 月末の最後まで確実にデータを取得するため、翌月の1日を終了日に設定
+    # これにより月末日の23:59:59までのデータが含まれる
+    month_end=$(date -d "$month_start +1 month" '+%Y-%m-%d')
     
-    echo "取り込み中: $month_start から $month_end"
+    echo "取り込み中: $month_start から $month_end (月末まで完全取得)"
     
     python3 "$(dirname "$0")/pi-batch-ingester.py" \
         --config "$CONFIG_FILE" \
@@ -47,7 +49,7 @@ for month in $(seq 1 $MONTHS); do
         --metadata-dir "tag_metadata"
         
     # 取り込み間隔（PI-Serverへの負荷軽減）
-    sleep 10
+    sleep 60
 done
 
 # 個別ファイルを統合
