@@ -56,11 +56,18 @@ export function generateCsvContent(data: DataPoint[], includeTags: boolean = tru
       groupedByTimestamp[point.timestamp][point.tag] = point.value;
     }
 
-    // ヘッダー行: timestamp + タグ名のリスト
-    const headerRow = ['timestamp', ...tagsList].join(',');
+    // タグ名から設備名プレフィックスを除去
+    const cleanTagsList = tagsList.map(tag => {
+      const dotIndex = tag.indexOf('.');
+      return dotIndex > 0 ? tag.substring(dotIndex + 1) : tag;
+    });
+
+    // ヘッダー行: timestamp + クリーンなタグ名のリスト
+    const headerRow = ['timestamp', ...cleanTagsList].join(',');
     
     // データ行
     const rows = Object.entries(groupedByTimestamp).map(([timestamp, values]) => {
+      // クリーンなタグ名の順序に合わせて値を配列に変換
       const rowValues = tagsList.map(tag => {
         const value = values[tag];
         return value === null ? '' : value;
@@ -91,7 +98,10 @@ export function generateCsvContent(data: DataPoint[], includeTags: boolean = tru
       const localTimestamp = convertUtcToLocal(point.timestamp);
       
       if (includeTags && tagsList.length === 1) {
-        return `${localTimestamp},${point.tag || ''},${point.value === null ? '' : point.value}`;
+        // タグ名から設備名プレフィックスを除去
+        const cleanTagName = point.tag ? 
+          (point.tag.indexOf('.') > 0 ? point.tag.substring(point.tag.indexOf('.') + 1) : point.tag) : '';
+        return `${localTimestamp},${cleanTagName},${point.value === null ? '' : point.value}`;
       } else {
         return `${localTimestamp},${point.value === null ? '' : point.value}`;
       }
