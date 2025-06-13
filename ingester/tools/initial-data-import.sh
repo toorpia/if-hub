@@ -26,7 +26,7 @@ for config_file in configs/equipments/*/config.yaml; do
         equipment_name=$(basename $(dirname $config_file))
         echo "処理中: $equipment_name"
         
-        python3 tools/pi-batch-ingester.py \
+        python3 "$(dirname "$0")/pi-batch-ingester.py" \
             --config "$config_file" \
             --host "$PI_HOST" \
             --port "$PI_PORT" \
