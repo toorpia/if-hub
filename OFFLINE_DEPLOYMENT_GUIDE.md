@@ -86,7 +86,7 @@ docker ps | grep if-hub
 ### システム監視
 
 ```bash
-./scripts/check-system.sh
+./tools/check-system.sh
 ```
 
 ## トラブルシューティング
@@ -133,9 +133,9 @@ docker compose restart
 - **設備設定**: `configs/equipments/{設備名}/config.yaml`
 
 ### 運用スクリプト
-- `scripts/check-system.sh` - 動作確認
-- `scripts/monitor-system.sh` - システム監視
-- `scripts/initial-data-import.sh` - 初期データ取り込み
+- `tools/check-system.sh` - 動作確認
+- `tools/monitor-system.sh` - システム監視
+- `tools/initial-data-import.sh` - 初期データ取り込み
 
 ## 完了確認
 
