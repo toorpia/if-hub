@@ -106,9 +106,32 @@ mkdir -p offline-deployment/if-hub/db
 
 echo "✅ データディレクトリの確認・保護完了"
 
-# 3. Fetcherバイナリを生成
+# 3. ツールとスクリプトの収集
 echo ""
-echo "🔧 Fetcherバイナリを生成しています..."
+echo "🔧 ツールとスクリプトを収集しています..."
+
+# プロジェクト共通ツール（システム運用・監視）
+echo "   プロジェクト共通ツールをコピー中..."
+if [ -d "tools" ]; then
+    cp tools/*.sh offline-deployment/if-hub/tools/ 2>/dev/null || true
+    echo "   ✅ プロジェクト共通ツール配置完了"
+else
+    echo "   ⚠️  tools/ ディレクトリが見つかりません"
+fi
+
+# PI関連ツール
+echo "   PI関連ツールをコピー中..."
+if [ -d "ingester/tools" ]; then
+    cp ingester/tools/*.py offline-deployment/if-hub/tools/ 2>/dev/null || true
+    cp ingester/tools/*.sh offline-deployment/if-hub/tools/ 2>/dev/null || true
+    cp ingester/tools/*.md offline-deployment/if-hub/tools/ 2>/dev/null || true
+    echo "   ✅ PI関連ツール配置完了"
+else
+    echo "   ⚠️  ingester/tools/ ディレクトリが見つかりません"
+fi
+
+# Fetcherバイナリを生成
+echo "   Fetcherバイナリを生成中..."
 cd fetcher
 if ! npm run build:binary; then
     echo "❌ Fetcherバイナリの生成に失敗しました"
@@ -119,7 +142,9 @@ cd ..
 # Fetcherバイナリをコピー
 cp fetcher/dist/bin/if-hub-fetcher offline-deployment/if-hub/tools/
 chmod +x offline-deployment/if-hub/tools/if-hub-fetcher
-echo "✅ Fetcherバイナリの配置完了"
+echo "   ✅ Fetcherバイナリ配置完了"
+
+echo "✅ 全ツール・スクリプトの収集完了"
 
 # 4. パッケージタイプ別の処理
 if [ "$need_container_export" = true ]; then
