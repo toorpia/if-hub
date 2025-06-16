@@ -23,6 +23,7 @@ IF-HUBは以下の主要コンポーネントで構成されています：
 
 ### 拡張機能
 - **gTag システム** (`gtags/`) - 仮想タグ生成・計算処理
+- **プラグインシステム** (`plugins/`) - analyzer、notifier、presenter型プラグインによる拡張機能
 - **オフライン配布** (`offline-deployment/`) - 顧客環境移行ツール
 
 
@@ -259,6 +260,7 @@ IF-HUBは以下の主要ディレクトリで構成されています：
 - [運用マニュアル](docs/ja/operations_manual.md) - インストール、設定、運用の詳細
 - [APIマニュアル](docs/ja/api_manual.md) - APIエンドポイントの詳細と使用例
 - [開発者ガイド](docs/ja/developer_guide.md) - アーキテクチャ、コード詳細、拡張方法
+- [プラグインシステムガイド](docs/ja/plugin.md) - プラグイン開発・運用の詳細
 - [高次元時系列データのリサンプリング原則](docs/ja/timeseries_resampling_principles.md) - 時系列データの前処理と解析における理論的基礎
 
 ## データベースの選択と拡張性
