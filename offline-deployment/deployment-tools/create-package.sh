@@ -146,7 +146,91 @@ echo "   ✅ Fetcherバイナリ配置完了"
 
 echo "✅ 全ツール・スクリプトの収集完了"
 
-# 4. パッケージタイプ別の処理
+# 4. プラグインシステムの統合
+echo ""
+echo "🔌 プラグインシステムを確認・統合しています..."
+
+# プラグインシステム存在確認
+if [ -d "plugins" ] && [ -f "plugins/run_plugin.py" ]; then
+    echo "   📦 プラグインシステムが検出されました"
+    
+    # プラグインディレクトリをコピー
+    echo "   プラグインファイルをコピー中..."
+    cp -r plugins/ offline-deployment/if-hub/
+    
+    # 仮想環境のチェック
+    VENV_COUNT=0
+    VENV_SIZE_TOTAL=0
+    
+    if [ -d "plugins/venvs" ]; then
+        echo "   🔍 プラグイン仮想環境を確認中..."
+        
+        for venv_type in analyzers notifiers presenters; do
+            if [ -d "plugins/venvs/$venv_type" ]; then
+                for venv_dir in plugins/venvs/$venv_type/*/; do
+                    if [ -d "$venv_dir" ] && [ -x "${venv_dir}bin/python" ]; then
+                        venv_name=$(basename "$venv_dir")
+                        venv_size=$(du -sm "$venv_dir" 2>/dev/null | cut -f1 || echo "0")
+                        VENV_COUNT=$((VENV_COUNT + 1))
+                        VENV_SIZE_TOTAL=$((VENV_SIZE_TOTAL + venv_size))
+                        echo "     ✅ $venv_type/$venv_name (${venv_size}MB)"
+                    fi
+                done
+            fi
+        done
+        
+        if [ $VENV_COUNT -gt 0 ]; then
+            echo "   📊 仮想環境統計: ${VENV_COUNT}個、合計${VENV_SIZE_TOTAL}MB"
+            
+            # 大容量の場合は警告
+            if [ $VENV_SIZE_TOTAL -gt 300 ]; then
+                echo "   ⚠️  仮想環境が大容量です (${VENV_SIZE_TOTAL}MB)"
+                echo "      パッケージサイズが大幅に増加する可能性があります"
+            fi
+        else
+            echo "   ℹ️  構築済み仮想環境が見つかりません"
+            echo "      顧客環境でプラグイン使用前に仮想環境構築が必要です"
+        fi
+    fi
+    
+    # プラグインリスト生成
+    if [ -f "offline-deployment/if-hub/plugins/run_plugin.py" ]; then
+        echo "   📋 利用可能プラグイン一覧を生成中..."
+        cd offline-deployment/if-hub
+        
+        # プラグインリスト生成
+        if python3 plugins/run_plugin.py list > plugins_list.json 2>/dev/null; then
+            echo "     ✅ plugins_list.json を生成しました"
+        else
+            echo "     ⚠️  プラグインリスト生成に失敗（非致命的）"
+        fi
+        
+        cd - > /dev/null
+    fi
+    
+    # プラグイン用セットアップスクリプト情報追加
+    if [ -d "offline-deployment/if-hub/plugins/venv_management" ]; then
+        echo "   🔧 プラグイン管理スクリプトを確認..."
+        echo "     ✅ 仮想環境構築: plugins/venv_management/setup_venv_analyzer.sh"
+        echo "     ✅ パッケージ作成: plugins/venv_management/package_venv.sh"
+    fi
+    
+    echo "✅ プラグインシステム統合完了"
+    
+    # パッケージ内容にプラグイン情報を追加
+    if [ $VENV_COUNT -gt 0 ]; then
+        package_content="$package_content
+   - プラグインシステム (${VENV_COUNT}個の仮想環境)"
+    else
+        package_content="$package_content
+   - プラグインシステム (仮想環境要構築)"
+    fi
+    
+else
+    echo "   ℹ️  プラグインシステムが見つかりません（スキップ）"
+fi
+
+# 5. パッケージタイプ別の処理
 if [ "$need_container_export" = true ]; then
     # コンテナイメージをエクスポート
     echo ""

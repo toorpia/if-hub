@@ -1,0 +1,69 @@
+plugin_info:
+  name: "toorpia_backend"
+  display_name: "toorPIA Backend Analyzer"
+  description: "toorPIA backend APIとの連携によるベースマップ生成・追加プロット処理"
+  version: "1.0.0"
+  author: "IF-HUB Team"
+  documentation: "README.md"
+  
+plugin_type: "analyzer"
+
+capabilities:
+  - "fit_transform"    # ベースマップ生成
+  - "addplot"         # 追加プロット
+  
+requirements:
+  input_format: "CSV"
+  output_format: "JSON"
+  
+  # Python依存関係
+  dependencies:
+    - "requests>=2.25.0"
+    - "pandas>=1.3.0"
+    - "pyyaml>=5.4.0"
+  
+  # システム要件
+  system:
+    python_version: ">=3.8"
+    memory_mb: 512
+    disk_space_mb: 1024
+  
+compatibility:
+  if_hub_version: ">=1.0.0"
+  toorpia_api_version: ">=1.0.0"
+  
+configuration:
+  required_fields:
+    - "toorpia_integration.api_url"
+    - "basemap.source_tags"
+    - "toorpia_integration.enabled"
+  
+  optional_fields:
+    - "toorpia_integration.logging.level"
+    - "toorpia_integration.validation.timeout_seconds"
+    - "toorpia_integration.auth.session_key"
+  
+execution_modes:
+  - name: "basemap_update"
+    description: "ベースマップ更新処理"
+    frequency: "低頻度（10日間隔等）"
+    
+  - name: "addplot_update"  
+    description: "追加プロット処理"
+    frequency: "高頻度（10分間隔等）"
+
+monitoring:
+  health_check_endpoint: "/status"
+  metrics:
+    - "execution_count"
+    - "execution_duration"
+    - "api_call_count"
+    - "error_count"
+
+# オフライン環境対応
+venv_requirements:
+  venv_path: "venvs/analyzers/toorpia_backend"  # 仮想環境パス
+  offline_mode: true                            # オフライン実行モード
+  requirements_file: "requirements/analyzers/toorpia_backend_requirements.txt"
+  python_version: ">=3.8"
+  

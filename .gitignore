@@ -97,3 +97,50 @@ equipment.csv
 equipment.zip
 error.log
 .clinerules/
+
+# Plugin system specific files
+# Python cache files in plugins
+plugins/**/__pycache__/
+plugins/**/*.pyc
+plugins/**/*.pyo
+plugins/**/*.pyd
+plugins/**/.pytest_cache/
+
+# Plugin virtual environments (keep only structure)
+plugins/venvs/analyzers/*/
+plugins/venvs/notifiers/*/
+plugins/venvs/presenters/*/
+!plugins/venvs/analyzers/.gitkeep
+!plugins/venvs/notifiers/.gitkeep
+!plugins/venvs/presenters/.gitkeep
+
+# Plugin virtual environment packages
+plugins/venvs/packages/*.tar.gz
+plugins/venvs/packages/*.zip
+
+# Plugin logs
+plugins/logs/
+plugins/**/*.log
+!plugins/logs/.gitkeep
+
+# Plugin development and test files
+plugins/**/tests/output/
+plugins/**/tests/temp/
+plugins/**/coverage/
+plugins/**/.coverage
+
+# Plugin offline deployment packages
+offline-deployment/plugin-packages/
+plugins/offline-packages/
+
+# Plugin configuration with sensitive data
+plugins/**/config.local.*
+plugins/**/secrets.*
+plugins/**/.env.local
+plugins/**/.env.production
+
+# Plugin temporary files
+plugins/**/tmp/
+plugins/**/temp/
+plugins/**/*.tmp
+plugins/**/*.temp
