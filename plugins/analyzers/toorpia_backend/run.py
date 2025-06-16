@@ -25,12 +25,11 @@ def run(config_path: str, **kwargs) -> Dict[str, Any]:
         実行結果
     """
     try:
-        # 環境変数設定（kwargsから）
-        if 'mode' in kwargs:
-            os.environ['TOORPIA_MODE'] = kwargs['mode']
+        # モード引数を直接渡す
+        mode = kwargs.get('mode')
         
         # アナライザー実行
-        analyzer = ToorPIAAnalyzer(config_path)
+        analyzer = ToorPIAAnalyzer(config_path, mode=mode)
         result = analyzer.execute()
         
         return result
