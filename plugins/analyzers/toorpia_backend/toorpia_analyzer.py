@@ -132,7 +132,7 @@ class ToorPIAAnalyzer(BaseAnalyzer):
         return mode
     
     def _fetch_equipment_data(self) -> bool:
-        """Fetcherを使用した設備データ取得"""
+        """IF-HUB APIを直接使用した設備データ取得"""
         try:
             # 一時ファイルパス生成
             self.temp_csv_path = self.temp_manager.generate_temp_filename("csv")
@@ -141,49 +141,128 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             basemap_config = self.config['basemap']
             
             # データ期間計算
-            if self.processing_mode == "basemap_update":
-                lookback_period = basemap_config.get('update', {}).get('interval', '10D')
-            else:  # addplot_update
-                lookback_period = basemap_config.get('addplot', {}).get('lookback_period', '10D')
-            
-            # 開始時刻計算
             from datetime import datetime, timedelta
-            if lookback_period.endswith('D'):
-                days = int(lookback_period[:-1])
-                start_time = datetime.now() - timedelta(days=days)
-            elif lookback_period.endswith('m'):
-                minutes = int(lookback_period[:-1])
-                start_time = datetime.now() - timedelta(minutes=minutes)
-            else:
-                start_time = datetime.now() - timedelta(days=10)  # デフォルト
+            import dateutil.parser
             
-            start_date = start_time.strftime("%Y%m%d%H%M")
+            if self.processing_mode == "basemap_update":
+                # basemap更新の場合は update 設定を使用
+                update_config = basemap_config.get('update', {})
+                start_time, end_time = self._calculate_time_range(update_config)
+            else:  # addplot_update
+                # addplot更新の場合は addplot 設定を使用
+                addplot_config = basemap_config.get('addplot', {})
+                lookback_period = addplot_config.get('lookback_period', '10D')
+                end_time = datetime.now()
+                start_time = self._parse_interval_to_start_time(lookback_period, end_time)
             
-            # Fetcher実行
-            fetcher_cmd = [
-                "node", "dist/bin/if-hub-fetcher",
-                "--equipment", self.equipment_name,
-                "--start-date", start_date,
-                "--output-dir", "tmp",
-                "--verbose"
-            ]
+            # ISO形式に変換
+            start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            end_iso = end_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
             
-            result = subprocess.run(fetcher_cmd, cwd="fetcher", capture_output=True, text=True)
+            self.logger.info(f"Fetching data from {start_iso} to {end_iso}")
             
-            if result.returncode == 0:
-                # 生成されたCSVファイルを一時ファイルパスにコピー
-                generated_csv = f"fetcher/tmp/{self.equipment_name}_{start_date}.csv"
-                if os.path.exists(generated_csv):
-                    import shutil
-                    shutil.copy2(generated_csv, self.temp_csv_path)
-                    self.logger.info(f"Equipment data fetched: {self.temp_csv_path}")
-                    return True
-            
-            self.logger.error(f"Fetcher execution failed: {result.stderr}")
-            return False
+            # IF-HUB APIでデータ取得
+            return self._fetch_data_via_api(start_iso, end_iso)
             
         except Exception as e:
             self.logger.error(f"Failed to fetch equipment data: {e}")
+            return False
+    
+    def _fetch_data_via_api(self, start_iso: str, end_iso: str) -> bool:
+        """IF-HUB APIを使用してデータ取得"""
+        try:
+            # 1. 設備のタグ一覧取得（gtagsも含む）
+            tags_url = f"http://localhost:3001/api/tags?equipment={self.equipment_name}&includeGtags=true"
+            tags_response = requests.get(tags_url, timeout=30)
+            tags_response.raise_for_status()
+            
+            tags_data = tags_response.json()
+            tags = tags_data.get('tags', [])
+            
+            if not tags:
+                self.logger.error(f"No tags found for equipment: {self.equipment_name}")
+                return False
+            
+            self.logger.info(f"Found {len(tags)} tags for equipment {self.equipment_name}")
+            
+            # 2. 各タグのデータ取得
+            all_data = {}
+            timestamps = set()
+            
+            for tag in tags:
+                tag_name = tag['name']  # e.g., "7th-untan.POW:7I1032.PV"
+                
+                # source_tagまたはnameをカラム名として使用
+                if tag.get('is_gtag', False):
+                    # gtagの場合はnameを使用
+                    column_name = tag_name.split('.')[-1] if '.' in tag_name else tag_name
+                else:
+                    # 通常タグの場合はsource_tagを使用
+                    column_name = tag.get('source_tag', tag_name)
+                
+                # データAPI呼び出し
+                data_url = f"http://localhost:3001/api/data/{tag_name}"
+                params = {
+                    'start': start_iso,
+                    'end': end_iso
+                }
+                
+                self.logger.debug(f"Fetching data for tag: {tag_name} -> {column_name}")
+                data_response = requests.get(data_url, params=params, timeout=60)
+                
+                if data_response.status_code == 200:
+                    tag_data = data_response.json()
+                    data_points = tag_data.get('data', [])
+                    
+                    all_data[column_name] = {}
+                    
+                    for point in data_points:
+                        timestamp = point['timestamp']
+                        value = point['value']
+                        all_data[column_name][timestamp] = value
+                        timestamps.add(timestamp)
+                    
+                    self.logger.debug(f"Tag {column_name}: {len(data_points)} data points")
+                else:
+                    self.logger.warning(f"Failed to fetch data for tag {tag_name}: {data_response.status_code}")
+            
+            # 3. DataFrameに変換
+            timestamps_sorted = sorted(list(timestamps))
+            
+            if not timestamps_sorted:
+                self.logger.error("No data points found for any tags")
+                return False
+            
+            # CSVデータ構築
+            csv_data = []
+            for timestamp in timestamps_sorted:
+                # timestampを適切な形式に変換 (ISO -> "YYYY-MM-DD HH:MM:SS")
+                from datetime import datetime as dt
+                try:
+                    dt_obj = dt.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    formatted_timestamp = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    formatted_timestamp = timestamp
+                
+                row = {'timestamp': formatted_timestamp}
+                for column_name in all_data.keys():
+                    value = all_data[column_name].get(timestamp, '')
+                    row[column_name] = value
+                csv_data.append(row)
+            
+            # DataFrameに変換してCSV保存
+            df = pd.DataFrame(csv_data)
+            
+            if not df.empty:
+                df.to_csv(self.temp_csv_path, index=False)
+                self.logger.info(f"Equipment data saved: {self.temp_csv_path} ({len(df)} rows, {len(df.columns)-1} tags)")
+                return True
+            else:
+                self.logger.error("No data retrieved from API")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"API data fetch failed: {e}")
             return False
     
     def _execute_basemap_update(self) -> Dict[str, Any]:
@@ -295,10 +374,106 @@ class ToorPIAAnalyzer(BaseAnalyzer):
     
     def _get_session_key(self) -> str:
         """toorPIA認証セッションキー取得"""
-        # 実装では認証API呼び出し、キャッシュ管理等
-        # 簡易実装では設定ファイルから取得
         auth_config = self.config.get('toorpia_integration', {}).get('auth', {})
-        return auth_config.get('session_key', 'default_session_key')
+        api_key = auth_config.get('session_key', '')  # これは実際にはAPIキー
+        
+        if not api_key:
+            raise ValueError("API key not found in configuration")
+        
+        # APIキーを使ってセッションキーを取得
+        auth_url = f"{self.api_url}/auth/login"
+        auth_data = {"apiKey": api_key}
+        
+        self.logger.info("Authenticating with toorPIA Backend API")
+        
+        try:
+            response = requests.post(
+                auth_url,
+                json=auth_data,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                session_key = result.get('sessionKey')
+                if session_key:
+                    self.logger.info("Authentication successful, session key obtained")
+                    return session_key
+                else:
+                    raise ValueError("No session key in authentication response")
+            else:
+                error_msg = f"Authentication failed: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            self.logger.error(f"Authentication error: {e}")
+            raise
+    
+    def _calculate_time_range(self, update_config: Dict[str, Any]) -> tuple:
+        """basemap更新時の時間範囲計算（新しい設定構造に対応）"""
+        from datetime import datetime
+        import dateutil.parser
+        
+        update_type = update_config.get('type', 'periodic')
+        
+        if update_type == 'fix':
+            # 固定期間モード
+            data_config = update_config.get('data', {})
+            start_time_str = data_config.get('start')
+            end_time_str = data_config.get('end')
+            
+            if not start_time_str or not end_time_str:
+                raise ValueError("type='fix' requires 'data.start' and 'data.end' parameters")
+            
+            try:
+                start_time = dateutil.parser.parse(start_time_str)
+                end_time = dateutil.parser.parse(end_time_str)
+                self.logger.info(f"Using fixed time range: {start_time_str} to {end_time_str}")
+                return start_time, end_time
+            except Exception as e:
+                raise ValueError(f"Invalid datetime format in data.start/end: {e}")
+                
+        elif update_type == 'periodic':
+            # 周期モード - data.lookback を使用
+            data_config = update_config.get('data', {})
+            lookback_period = data_config.get('lookback', '10D')
+            
+            end_time = datetime.now()
+            start_time = self._parse_interval_to_start_time(lookback_period, end_time)
+            self.logger.info(f"Using periodic data range: {lookback_period} lookback from current time")
+            return start_time, end_time
+            
+        else:
+            raise ValueError(f"Invalid update type '{update_type}'. Must be 'fix' or 'periodic'")
+    
+    def _parse_interval_to_start_time(self, interval: str, end_time) -> 'datetime':
+        """間隔文字列から開始時間を計算"""
+        from datetime import timedelta
+        
+        try:
+            if interval.endswith('D') or interval.endswith('d'):
+                days = int(interval[:-1])
+                return end_time - timedelta(days=days)
+            elif interval.endswith('H') or interval.endswith('h'):
+                hours = int(interval[:-1])
+                return end_time - timedelta(hours=hours)
+            elif interval.endswith('m'):
+                minutes = int(interval[:-1])
+                return end_time - timedelta(minutes=minutes)
+            elif interval.endswith('s'):
+                seconds = int(interval[:-1])
+                return end_time - timedelta(seconds=seconds)
+            else:
+                # デフォルトは日数として扱う
+                days = int(interval)
+                self.logger.warning(f"No unit specified for interval '{interval}', treating as days")
+                return end_time - timedelta(days=days)
+        except ValueError as e:
+            self.logger.error(f"Invalid interval format '{interval}': {e}")
+            # フォールバック: 10日間
+            return end_time - timedelta(days=10)
     
     def _get_latest_map_no(self) -> int:
         """最新のマップ番号取得"""
