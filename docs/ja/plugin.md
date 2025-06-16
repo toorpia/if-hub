@@ -10,7 +10,8 @@
 6. [仮想環境管理](#仮想環境管理)
 7. [プラグイン実行](#プラグイン実行)
 8. [オフライン環境配置](#オフライン環境配置)
-9. [トラブルシューティング](#トラブルシューティング)
+9. [エラーハンドリング](#エラーハンドリング)
+10. [トラブルシューティング](#トラブルシューティング)
 
 ## プラグインシステム概要
 
@@ -1369,6 +1370,231 @@ python3 plugins/schedule_plugin.py --setup --type analyzer --name toorpia_backen
 - ログファイルアクセス権の制限
 
 この実装例は、IF-HUB プラグインシステムの柔軟性と拡張性を活用し、企業の既存システムとの統合を実現するための参考となります。
+
+## エラーハンドリング
+
+### エラーハンドリングシステム概要
+
+IF-HUBプラグインシステムでは、堅牢で診断しやすい統一されたエラーハンドリング機構を提供しています。プラグイン実行時に発生する可能性のある全てのエラーを構造化し、適切な自動回復機能と詳細な診断情報を提供します。
+
+詳細な情報については、[エラーハンドリングガイド](error_handling.md) を参照してください。
+
+### エラー分類
+
+プラグインシステムでは、エラーを重要度と回復可能性に基づいて分類しています：
+
+#### 高重要度エラー（即座対応必要）
+- **ConfigurationError**: 設定ファイルの構文エラー、必須パラメータの欠落
+- **ProcessingModeError**: 不正な処理モード指定
+- **AuthenticationError**: API認証の失敗、セッションキーの期限切れ
+
+#### 中重要度エラー（自動回復対象）
+- **APIConnectionError**: API接続失敗、タイムアウト（自動リトライあり）
+- **DataFetchError**: データ取得失敗（部分的継続可能）
+- **ValidationError**: API応答の構造不正、必須フィールドの欠落
+
+#### 低重要度エラー（一時的）
+- **LockError**: 排他制御のロック取得失敗（時間解決）
+- **TempFileError**: 一時ファイルの作成失敗
+
+### 自動回復機能
+
+#### リトライ機構
+```python
+# 自動設定されるリトライ動作例
+APIコール: 最大3回、指数バックオフ（1s, 2s, 4s）
+データ取得: 最大5回、指数バックオフ（2s, 3s, 4.5s, 6.75s, 10s）
+認証処理: 最大2回、固定間隔（0.5s, 1s）
+```
+
+#### 回路ブレーカー
+連続的な失敗からサービスを保護する機能：
+
+| サービス | 失敗閾値 | 回復タイムアウト |
+|----------|----------|------------------|
+| toorPIA API | 3回 | 30秒 |
+| IF-HUB API | 5回 | 60秒 |
+| 認証処理 | 2回 | 120秒 |
+
+### プラグイン開発でのエラーハンドリング
+
+#### BaseAnalyzer でのエラー統合
+
+```python
+from plugins.base.errors import (
+    ConfigurationError, APIConnectionError, DataFetchError,
+    ValidationError, get_error_severity
+)
+
+class MyAnalyzer(BaseAnalyzer):
+    def validate_config(self) -> bool:
+        """強化された設定バリデーション"""
+        try:
+            if 'required_section' not in self.config:
+                raise ConfigurationError(
+                    "Missing required_section in config",
+                    config_path=self.config_path,
+                    invalid_field="required_section"
+                )
+            return True
+        except ConfigurationError as e:
+            self.logger.error(f"Configuration error: {e}")
+            self.logger.error(f"Suggestions: {', '.join(e.suggestions)}")
+            return False
+    
+    def execute(self) -> Dict[str, Any]:
+        """エラーハンドリング統合実行"""
+        try:
+            result = self._perform_analysis()
+            return self._create_success_response(result)
+        
+        except APIConnectionError as e:
+            # API関連エラーは詳細ログ付きで返す
+            self.logger.error(f"API operation failed: {e}")
+            return self._create_detailed_error_response(e)
+        
+        except Exception as e:
+            # 予期しないエラーの適切な変換
+            if "config" in str(e).lower():
+                error = ConfigurationError(f"Configuration issue: {str(e)}")
+            else:
+                error = PluginError(f"Plugin execution failed: {str(e)}", "EXECUTION_FAILED")
+            
+            return self._create_detailed_error_response(error)
+    
+    def _create_detailed_error_response(self, error: 'PluginError') -> Dict[str, Any]:
+        """詳細エラー応答生成"""
+        severity = get_error_severity(error)
+        
+        return {
+            "status": "error",
+            "equipment": self.equipment_name,
+            "timestamp": self._get_timestamp(),
+            "error": {
+                "type": error.__class__.__name__,
+                "code": error.error_code,
+                "message": str(error),
+                "severity": severity,
+                "details": error.details,
+                "suggestions": error.suggestions,
+                "retry_info": error.retry_info
+            },
+            "context": {
+                "processing_mode": getattr(self, 'processing_mode', None),
+                "config_path": self.config_path
+            }
+        }
+```
+
+#### 強化APIクライアントの使用
+
+```python
+from plugins.base.api_client import create_toorpia_client, create_ifhub_client
+
+class MyAnalyzer(BaseAnalyzer):
+    def __init__(self, config_path: str):
+        super().__init__(config_path)
+        
+        # 自動リトライ・回路ブレーカー付きAPIクライアント
+        self.toorpia_client = create_toorpia_client(
+            api_url=self.config['toorpia_integration']['api_url'],
+            api_key=self.config['toorpia_integration']['auth']['session_key']
+        )
+        
+        self.ifhub_client = create_ifhub_client()
+    
+    def _call_external_api(self, data: Dict[str, Any]):
+        """自動保護機構付きAPI呼び出し"""
+        try:
+            # 自動リトライ・回路ブレーカーが適用される
+            response = self.toorpia_client.fit_transform(data)
+            return response
+            
+        except APIConnectionError as e:
+            # 詳細なエラー情報が自動的に含まれる
+            self.logger.error(f"API call failed: {e.details}")
+            raise
+```
+
+### 運用時のエラー監視
+
+#### エラー統計の取得
+
+```python
+# プラグイン実行後のエラー統計確認
+result = run_plugin("analyzer", "my_plugin", config_path)
+
+if result.get("status") == "error":
+    error_info = result["error"]
+    
+    # エラー重要度に基づく対応
+    if error_info["severity"] == "HIGH":
+        # 即座対応が必要
+        send_alert(error_info)
+    elif error_info["severity"] == "MEDIUM":
+        # 監視と傾向分析
+        log_to_monitoring(error_info)
+```
+
+#### ヘルスチェック機能
+
+```python
+# APIクライアントの健康状態確認
+health_status = self.toorpia_client.get_health_status()
+
+print(f"Success rate: {health_status['stats']['success_rate_percent']}%")
+print(f"Circuit breaker state: {health_status['circuit_breaker']['current_state']}")
+```
+
+### エラー対応手順
+
+1. **エラー発生時の初期対応**
+   - エラーレベルと種類の確認
+   - 自動回復機能の動作状況確認
+   - 影響範囲の特定
+
+2. **設定エラー（HIGH）の場合**
+   - 設定ファイルの構文チェック
+   - 必須フィールドの存在確認
+   - 設定値の妥当性確認
+
+3. **API接続エラー（MEDIUM）の場合**
+   - サーバーの稼働状況確認
+   - ネットワーク接続確認
+   - 自動リトライと回路ブレーカーの状況確認
+
+4. **データエラー（MEDIUM）の場合**
+   - データソースの確認
+   - 部分的継続処理の活用
+   - グレースフル・デグラデーション機能の確認
+
+### 開発者向けカスタマイズ
+
+#### カスタムエラータイプの追加
+
+```python
+from plugins.base.errors import PluginError
+
+class MyCustomError(PluginError):
+    """カスタム解析エラー"""
+    
+    def __init__(self, message: str, analysis_type: str = ""):
+        details = {"analysis_type": analysis_type}
+        suggestions = [
+            "解析パラメータを確認してください",
+            "入力データの形式を確認してください"
+        ]
+        super().__init__(message, "CUSTOM_ANALYSIS_ERROR", details, suggestions)
+```
+
+#### エラー重要度のカスタマイズ
+
+```python
+# plugins/base/errors.py の ERROR_SEVERITY に追加
+ERROR_SEVERITY[MyCustomError] = "MEDIUM"
+```
+
+エラーハンドリングシステムにより、プラグインの安定性と診断性が大幅に向上し、運用負荷を軽減できます。詳細な設定例やトラブルシューティング方法については、[エラーハンドリングガイド](error_handling.md) をご参照ください。
 
 ## トラブルシューティング
 
