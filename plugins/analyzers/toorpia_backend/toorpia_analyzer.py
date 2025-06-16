@@ -2,15 +2,21 @@ import requests
 import pandas as pd
 import os
 import subprocess
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from ...base.base_analyzer import BaseAnalyzer
 from ...base.lock_manager import EquipmentLockManager
 from ...base.temp_file_manager import TempFileManager
+from ...base.errors import (
+    ConfigurationError, APIConnectionError, DataFetchError, 
+    ValidationError, AuthenticationError, ProcessingModeError,
+    TempFileError, LockError, get_error_severity
+)
+from ...base.api_client import create_toorpia_client, create_ifhub_client
 
 class ToorPIAAnalyzer(BaseAnalyzer):
     """toorPIA Backend API連携アナライザー"""
     
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, mode: Optional[str] = None):
         super().__init__(config_path)
         
         # 並列処理対応コンポーネント
@@ -27,7 +33,7 @@ class ToorPIAAnalyzer(BaseAnalyzer):
         self.timeout = toorpia_config.get('timeout', 300)
         
         # 処理モード
-        self.processing_mode: Optional[str] = None
+        self.processing_mode: Optional[str] = mode
         self.temp_csv_path: Optional[str] = None
         
     def prepare(self) -> bool:
@@ -51,85 +57,165 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             return False
     
     def validate_config(self) -> bool:
-        """設定ファイルバリデーション"""
+        """設定ファイルバリデーション（強化版）"""
         try:
             # toorpia_integration セクション存在確認
             if 'toorpia_integration' not in self.config:
-                self.logger.error("Missing 'toorpia_integration' section in config")
-                return False
+                raise ConfigurationError(
+                    "Missing 'toorpia_integration' section in config",
+                    config_path=self.config_path,
+                    invalid_field="toorpia_integration"
+                )
             
             toorpia_config = self.config['toorpia_integration']
             
             # enabled チェック
             if not toorpia_config.get('enabled', False):
-                self.logger.warning("toorPIA integration is disabled")
-                return False
+                raise ConfigurationError(
+                    "toorPIA integration is disabled",
+                    config_path=self.config_path,
+                    invalid_field="toorpia_integration.enabled"
+                )
             
             # basemap セクション存在確認
             if 'basemap' not in self.config:
-                self.logger.error("Missing 'basemap' section in config")
-                return False
+                raise ConfigurationError(
+                    "Missing 'basemap' section in config",
+                    config_path=self.config_path,
+                    invalid_field="basemap"
+                )
             
             basemap_config = self.config['basemap']
             
             # source_tags 存在確認
             if 'source_tags' not in basemap_config or not basemap_config['source_tags']:
-                self.logger.error("Missing or empty 'source_tags' in basemap config")
-                return False
+                raise ConfigurationError(
+                    "Missing or empty 'source_tags' in basemap config",
+                    config_path=self.config_path,
+                    invalid_field="basemap.source_tags"
+                )
+            
+            # API URL検証
+            if not toorpia_config.get('api_url'):
+                raise ConfigurationError(
+                    "Missing API URL in toorpia_integration config",
+                    config_path=self.config_path,
+                    invalid_field="toorpia_integration.api_url"
+                )
             
             self.logger.info("Config validation passed")
             return True
             
+        except ConfigurationError as e:
+            self.logger.error(f"Configuration error: {e}")
+            self.logger.error(f"Suggestions: {', '.join(e.suggestions)}")
+            return False
         except Exception as e:
             self.logger.error(f"Config validation failed: {e}")
             return False
     
     def execute(self) -> Dict[str, Any]:
-        """排他制御付きメイン処理実行"""
+        """排他制御付きメイン処理実行（強化版エラーハンドリング）"""
+        accumulated_errors = []
+        
         try:
             with self.lock_manager.acquire_lock(timeout=30):
                 self.logger.info(f"Starting analysis for {self.equipment_name}")
                 
+                # 1. 事前処理
                 if not self.prepare():
-                    return self._create_error_response("Preparation failed", "PREPARE_FAILED")
+                    error = DataFetchError(
+                        "Preparation phase failed - could not prepare data for analysis",
+                        equipment_name=self.equipment_name
+                    )
+                    return self._create_detailed_error_response(error)
                 
+                # 2. 設定バリデーション
                 if not self.validate_config():
-                    return self._create_error_response("Config validation failed", "CONFIG_INVALID")
+                    error = ConfigurationError(
+                        "Configuration validation failed",
+                        config_path=self.config_path
+                    )
+                    return self._create_detailed_error_response(error)
                 
-                # 処理モード別実行
-                if self.processing_mode == "basemap_update":
-                    result = self._execute_basemap_update()
-                elif self.processing_mode == "addplot_update":
-                    result = self._execute_addplot_update()
-                else:
-                    return self._create_error_response(f"Unknown processing mode: {self.processing_mode}", "MODE_UNKNOWN")
+                # 3. 処理モード別実行
+                try:
+                    if self.processing_mode == "basemap_update":
+                        result = self._execute_basemap_update()
+                    elif self.processing_mode == "addplot_update":
+                        result = self._execute_addplot_update()
+                    else:
+                        error = ProcessingModeError(
+                            f"Unknown processing mode: {self.processing_mode}",
+                            specified_mode=self.processing_mode,
+                            supported_modes=["basemap_update", "addplot_update"]
+                        )
+                        return self._create_detailed_error_response(error)
                 
-                # API応答バリデーション
-                if not self.validate_api_response(result):
-                    return self._create_error_response("API response validation failed", "RESPONSE_INVALID")
+                except (APIConnectionError, AuthenticationError, ValidationError) as e:
+                    # API関連エラーは詳細ログ付きで返す
+                    self.logger.error(f"API operation failed: {e}")
+                    return self._create_detailed_error_response(e)
                 
-                self.logger.info(f"Analysis completed for {self.equipment_name}")
+                # 4. API応答バリデーション
+                try:
+                    if not self.validate_api_response(result):
+                        error = ValidationError(
+                            "API response validation failed",
+                            validation_type="api_response",
+                            actual_data=result
+                        )
+                        return self._create_detailed_error_response(error)
+                
+                except Exception as e:
+                    error = ValidationError(
+                        f"Response validation error: {str(e)}",
+                        validation_type="response_structure"
+                    )
+                    return self._create_detailed_error_response(error)
+                
+                self.logger.info(f"Analysis completed successfully for {self.equipment_name}")
                 return self._create_success_response(result)
                 
         except TimeoutError:
-            error_msg = "Another process is running for this equipment"
-            self.logger.error(error_msg)
-            return self._create_error_response(error_msg, "LOCK_TIMEOUT")
+            error = LockError(
+                "Failed to acquire equipment lock - another process may be running",
+                equipment_name=self.equipment_name,
+                lock_timeout=30
+            )
+            return self._create_detailed_error_response(error)
         
         except Exception as e:
-            self.logger.error(f"Execution failed: {e}")
-            return self._create_error_response(str(e), "EXECUTION_FAILED")
+            # 予期しないエラーの場合
+            self.logger.error(f"Unexpected execution error: {e}", exc_info=True)
+            
+            # エラータイプに基づいて適切なPluginErrorに変換
+            if "config" in str(e).lower():
+                error = ConfigurationError(f"Configuration issue: {str(e)}", config_path=self.config_path)
+            elif "api" in str(e).lower() or "connection" in str(e).lower():
+                error = APIConnectionError(f"API connection issue: {str(e)}")
+            else:
+                # 汎用的なプラグインエラー
+                from ...base.errors import PluginError
+                error = PluginError(
+                    f"Plugin execution failed: {str(e)}",
+                    "EXECUTION_FAILED",
+                    details={"equipment": self.equipment_name, "mode": self.processing_mode}
+                )
+            
+            return self._create_detailed_error_response(error)
         
         finally:
             # 一時ファイルクリーンアップ
-            self.temp_manager.cleanup_temp_files()
+            try:
+                self.temp_manager.cleanup_temp_files()
+            except Exception as cleanup_error:
+                self.logger.warning(f"Failed to cleanup temp files: {cleanup_error}")
     
     def _determine_processing_mode(self) -> str:
         """処理モード判定"""
-        # 実装では、cron実行時の引数やスケジュール設定から判定
-        # 今回は環境変数やコマンドライン引数から取得
-        mode = os.getenv('TOORPIA_MODE', 'addplot_update')
-        return mode
+        # コンストラクタで指定されたモードを使用、未指定の場合はaddplot_update
+        return self.processing_mode or 'addplot_update'
     
     def _fetch_equipment_data(self) -> bool:
         """IF-HUB APIを直接使用した設備データ取得"""
@@ -149,11 +235,10 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 update_config = basemap_config.get('update', {})
                 start_time, end_time = self._calculate_time_range(update_config)
             else:  # addplot_update
-                # addplot更新の場合は addplot 設定を使用
-                addplot_config = basemap_config.get('addplot', {})
-                lookback_period = addplot_config.get('lookback_period', '10D')
-                end_time = datetime.now()
-                start_time = self._parse_interval_to_start_time(lookback_period, end_time)
+                # addplotテスト用: basemap期間から少量データを取得
+                start_time = dateutil.parser.parse("2024-01-15T10:00:00+09:00")
+                end_time = dateutil.parser.parse("2024-01-15T10:10:00+09:00")
+                self.logger.info("Using test data period for addplot (10 minutes from basemap period)")
             
             # ISO形式に変換
             start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -284,7 +369,7 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             request_data = {
                 "columns": columns,
                 "data": data,
-                "label": parameters.get('label', f"{self.equipment_name} Basemap"),
+                "label": self.equipment_name,  # 設備名のみ
                 "tag": f"{self.equipment_name}_basemap",
                 "description": parameters.get('description', f"{self.equipment_name} baseline analysis"),
                 "weight_option_str": parameters.get('weight_option_str', "1:0"),
@@ -302,7 +387,7 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             raise
     
     def _execute_addplot_update(self) -> Dict[str, Any]:
-        """addplot追加処理"""
+        """addplot追加処理（動的basemap取得対応）"""
         try:
             self.logger.info("Executing addplot update")
             
@@ -317,8 +402,9 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             addplot_processing = self.config['toorpia_integration'].get('addplot_processing', {})
             parameters = addplot_processing.get('parameters', {})
             
-            # 既存マップ情報取得（実装では前回のbasemapのmapNo使用）
-            map_no = self._get_latest_map_no()
+            # 設備名で最新の有効なbasemapを検索
+            map_no = self._get_latest_basemap_no(self.equipment_name)
+            self.logger.info(f"Using basemap {map_no} for addplot processing")
             
             request_data = {
                 "columns": columns,
@@ -335,8 +421,15 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             return response
             
         except Exception as e:
-            self.logger.error(f"Addplot update failed: {e}")
-            raise
+            if "No basemap found" in str(e) or "No valid basemap found" in str(e):
+                raise ProcessingModeError(
+                    f"Cannot perform addplot: {str(e)}. Please create a basemap first using basemap_update mode.",
+                    specified_mode="addplot_update",
+                    suggested_action="Run basemap_update mode first"
+                )
+            else:
+                self.logger.error(f"Addplot update failed: {e}")
+                raise
     
     def _call_toorpia_api(self, endpoint_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """toorPIA API呼び出し"""
@@ -475,11 +568,58 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             # フォールバック: 10日間
             return end_time - timedelta(days=10)
     
-    def _get_latest_map_no(self) -> int:
-        """最新のマップ番号取得"""
-        # 実装では前回のbasemap処理結果から取得
-        # 簡易実装では設定ファイルから取得
-        return self.config.get('toorpia_integration', {}).get('state', {}).get('last_map_no', 1)
+    def _get_equipment_basemaps(self, equipment_name: str) -> List[Dict]:
+        """設備名でbasemap一覧を取得"""
+        try:
+            session_key = self._get_session_key()
+            url = f"{self.api_url}/maps"
+            headers = {'session-key': session_key}
+            
+            self.logger.info(f"Fetching basemap list for equipment: {equipment_name}")
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            all_maps = response.json()
+            
+            # 設備名でフィルタ
+            equipment_maps = [m for m in all_maps if m.get('label') == equipment_name]
+            
+            self.logger.info(f"Found {len(equipment_maps)} basemaps for equipment {equipment_name}")
+            for i, basemap in enumerate(equipment_maps):
+                self.logger.debug(f"  Basemap {i+1}: mapNo={basemap.get('mapNo')}, "
+                                f"nRecord={basemap.get('nRecord')}, "
+                                f"createdAt={basemap.get('createdAt')}")
+            
+            # 作成日時でソート（最新順）
+            return sorted(equipment_maps, key=lambda x: x['createdAt'], reverse=True)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to fetch basemap list: {e}")
+            raise APIConnectionError(f"Failed to retrieve basemap list: {str(e)}")
+    
+    def _get_latest_basemap_no(self, equipment_name: str) -> int:
+        """設備の最新basemapのmapNoを取得（データ点数確認付き）"""
+        basemaps = self._get_equipment_basemaps(equipment_name)
+        
+        if not basemaps:
+            raise Exception(f"No basemap found for equipment: {equipment_name}")
+        
+        # 最新のbasemapから順に確認
+        for basemap in basemaps:
+            map_no = basemap['mapNo']
+            nRecord = basemap.get('nRecord', 0)
+            created_at = basemap.get('createdAt', 'unknown')
+            
+            self.logger.info(f"Checking basemap {map_no}: {nRecord} records, created at {created_at}")
+            
+            if nRecord > 0:
+                self.logger.info(f"Selected basemap {map_no} with {nRecord} data points")
+                return map_no
+            else:
+                self.logger.warning(f"Basemap {map_no} has no data points (nRecord={nRecord}), skipping")
+        
+        # すべてのbasemapがデータ点数0の場合
+        raise Exception(f"No valid basemap found for equipment {equipment_name} - all basemaps have 0 data points")
     
     def get_status(self) -> Dict[str, Any]:
         """ステータス取得"""
@@ -492,32 +632,88 @@ class ToorPIAAnalyzer(BaseAnalyzer):
         }
     
     def validate_api_response(self, response: Dict[str, Any]) -> bool:
-        """toorPIA API応答バリデーション"""
+        """toorPIA API応答バリデーション（処理モード別対応）"""
         try:
             validation_config = self.config.get('toorpia_integration', {}).get('validation', {})
             required_fields = validation_config.get('required_response_fields', ['message', 'resdata'])
             
             # 必須フィールド確認
+            missing_fields = []
             for field in required_fields:
                 if field not in response:
-                    self.logger.error(f"Missing required field in API response: {field}")
-                    return False
+                    missing_fields.append(field)
             
-            # resdata内のバリデーション
+            if missing_fields:
+                raise ValidationError(
+                    f"Missing required fields in API response: {', '.join(missing_fields)}",
+                    validation_type="api_response_structure",
+                    expected_fields=required_fields,
+                    actual_data=response
+                )
+            
+            # resdata内のバリデーション（処理モード別）
             if 'resdata' in response:
-                resdata_fields = validation_config.get('required_resdata_fields', ['mapNo'])
+                if self.processing_mode == "basemap_update":
+                    # basemapの場合はmapNoが必要
+                    resdata_fields = validation_config.get('required_resdata_fields', ['mapNo'])
+                else:
+                    # addplotの場合はmapNoは不要（入力として使用するが出力では不要）
+                    resdata_fields = []
+                
+                missing_resdata_fields = []
+                
                 for field in resdata_fields:
                     if field not in response['resdata']:
-                        self.logger.error(f"Missing required field in resdata: {field}")
-                        return False
+                        missing_resdata_fields.append(field)
+                
+                if missing_resdata_fields:
+                    raise ValidationError(
+                        f"Missing required fields in resdata: {', '.join(missing_resdata_fields)}",
+                        validation_type="api_resdata_structure",
+                        expected_fields=resdata_fields,
+                        actual_data=response.get('resdata', {})
+                    )
             
             # HTTP status確認
             if 'status' in response and response['status'] != 'success':
                 self.logger.warning(f"API returned non-success status: {response['status']}")
             
-            self.logger.info("API response validation passed")
+            self.logger.info(f"API response validation passed for {self.processing_mode}")
             return True
             
+        except ValidationError:
+            raise  # ValidationErrorはそのまま再発生
         except Exception as e:
             self.logger.error(f"API response validation failed: {e}")
-            return False
+            raise ValidationError(
+                f"Validation process error: {str(e)}",
+                validation_type="validation_process",
+                actual_data=response
+            )
+    
+    def _create_detailed_error_response(self, error: 'PluginError') -> Dict[str, Any]:
+        """詳細エラー応答生成（PluginError対応）"""
+        from ...base.errors import PluginError
+        
+        severity = get_error_severity(error)
+        
+        return {
+            "status": "error",
+            "equipment": self.equipment_name,
+            "timestamp": self._get_timestamp(),
+            "error": {
+                "type": error.__class__.__name__,
+                "code": error.error_code,
+                "message": str(error),
+                "severity": severity,
+                "details": error.details,
+                "suggestions": error.suggestions,
+                "retry_info": error.retry_info
+            },
+            "context": {
+                "processing_mode": self.processing_mode,
+                "config_path": self.config_path,
+                "api_url": self.api_url,
+                "temp_files": self.temp_manager.list_temp_files() if hasattr(self, 'temp_manager') else []
+            }
+        }

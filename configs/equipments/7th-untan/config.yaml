@@ -1,12 +1,9 @@
 basemap:
   update:
-    type: "periodic"
-    schedule:
-      interval: "weekly"
-      time: "02:00"
-      weekday: "sunday"
+    type: "fix"
     data:
-      lookback: "30D"
+      start: "2024-01-17T00:00:00+09:00"
+      end: "2024-01-22T00:00:00+09:00"
 
   heatmap:
     effective_radius: 0.1
@@ -49,7 +46,7 @@ basemap:
 
   addplot:
     interval: "10m"
-    lookback_period: "10D"
+    lookback_period: "2H"
 
   source_tags:
     - "POW:7I1032.PV"
@@ -103,7 +100,7 @@ toorpia_integration:
   basemap_processing:
     mode: "fit_transform"
     parameters:
-      label: "7th-untan Basemap"
+      label: "7th-untan"
       description: "7号機脱硫装置 基盤マップ"
       weight_option_str: "1:0"
       type_option_str: "1:date"
