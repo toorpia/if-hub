@@ -1,9 +1,12 @@
 basemap:
   update:
-    type: "fix"
-    interval: "10D"
-    #begin: "2025-03-01T00:00:00+09:00"
-    #end: "2025-03-01T00:00:00+09:00"
+    type: "periodic"
+    schedule:
+      interval: "weekly"
+      time: "02:00"
+      weekday: "sunday"
+    data:
+      lookback: "30D"
 
   heatmap:
     effective_radius: 0.1
@@ -93,7 +96,7 @@ toorpia_integration:
   
   # 認証設定
   auth:
-    session_key: "your_session_key_here"
+    session_key: "toorpia_b22b8e82ce359190e2b22b3b24b577cb84ae7fc7bf1f1220"
     auto_refresh: true
   
   # basemap処理設定

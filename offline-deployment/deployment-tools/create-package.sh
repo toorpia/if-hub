@@ -110,6 +110,9 @@ echo "✅ データディレクトリの確認・保護完了"
 echo ""
 echo "🔧 ツールとスクリプトを収集しています..."
 
+# toolsディレクトリの確保
+mkdir -p offline-deployment/if-hub/tools
+
 # プロジェクト共通ツール（システム運用・監視）
 echo "   プロジェクト共通ツールをコピー中..."
 if [ -d "tools" ]; then
@@ -133,10 +136,21 @@ fi
 # Fetcherバイナリを生成
 echo "   Fetcherバイナリを生成中..."
 cd fetcher
+
+# 依存関係インストール
+echo "   npm依存関係をインストール中..."
+if ! npm install; then
+    echo "❌ npm installに失敗しました"
+    exit 1
+fi
+
+# ビルド実行
+echo "   バイナリをビルド中..."
 if ! npm run build:binary; then
     echo "❌ Fetcherバイナリの生成に失敗しました"
     exit 1
 fi
+
 cd ..
 
 # Fetcherバイナリをコピー

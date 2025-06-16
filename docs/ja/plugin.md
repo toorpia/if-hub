@@ -1048,6 +1048,328 @@ plugins/venvs/analyzers/my_plugin/bin/pip install \
     -r plugins/analyzers/my_plugin/requirements.txt
 ```
 
+## toorPIA Backend統合例
+
+### 概要
+
+toorPIA Backend連携プラグインは、IF-HUBのプラグインシステムを活用した産業データ解析プラットフォーム統合の実装例です。IF-HUB APIを介したリアルタイムデータ取得、自動スケジュール管理、および外部解析システムとの連携機能を提供します。
+
+### アーキテクチャ
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   IF-HUB API    │    │ toorPIA Plugin  │    │ toorPIA Backend │
+│                 │    │                 │    │                 │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│ │ Tags API    │ │◄───┤ │Data Fetcher │ │    │ │fit_transform│ │
+│ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│ │ Data API    │ │◄───┤ │Analyzer Core│ │───►│ │   addplot   │ │
+│ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│ │Equipment API│ │◄───┤ │ Scheduler   │ │    │ │Authentication│
+│ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### IF-HUB API統合
+
+#### データ取得機能
+
+toorPIA Backendプラグインは、CSV ファイルではなく IF-HUB の RESTful API を直接使用してデータを取得します。これにより、リアルタイムデータアクセスと gtags（計算済みタグ）の自動収集が可能です。
+
+```python
+# plugins/analyzers/toorpia_backend/toorpia_analyzer.py の実装例
+def _fetch_data_via_api(self, start_iso: str, end_iso: str) -> bool:
+    """IF-HUB APIを使用してデータ取得"""
+    try:
+        # 1. 設備のタグ一覧取得（gtagsも含む）
+        tags_url = f"http://localhost:3001/api/tags?equipment={self.equipment_name}&includeGtags=true"
+        tags_response = requests.get(tags_url, timeout=30)
+        tags_data = tags_response.json()
+        tags = tags_data.get('tags', [])
+        
+        # 2. 各タグのデータ取得
+        all_data = {}
+        for tag in tags:
+            tag_name = tag['name']
+            column_name = tag.get('source_tag', tag_name) if not tag.get('is_gtag', False) else tag_name
+            
+            data_url = f"http://localhost:3001/api/data/{tag_name}"
+            params = {'start': start_iso, 'end': end_iso}
+            data_response = requests.get(data_url, params=params, timeout=60)
+            
+            if data_response.status_code == 200:
+                tag_data = data_response.json()
+                # データポイントを処理...
+```
+
+#### サポートされるデータタイプ
+
+- **通常タグ**: PI System から直接取得される生データ
+- **gtags**: IF-HUB 内で計算された派生データ（移動平均、統計値等）
+- **時系列データ**: ISO 形式タイムスタンプの自動正規化
+- **設備メタデータ**: タグ属性と設備固有情報
+
+### スケジュール管理システム
+
+#### 統合スケジューラ
+
+プラグインシステムは、`plugins/schedule_plugin.py` による統一されたスケジュール管理機能を提供します。
+
+```bash
+# 利用可能なプラグインの確認
+python3 plugins/schedule_plugin.py --list
+
+# スケジュールの初期セットアップ
+python3 plugins/schedule_plugin.py --setup --type analyzer --name toorpia_backend
+
+# スケジュール状況の確認
+python3 plugins/schedule_plugin.py --status --type analyzer --name toorpia_backend
+
+# 新規設備のスケジュール追加
+python3 plugins/schedule_plugin.py --add --config configs/equipments/new-equipment/config.yaml
+
+# スケジュールの有効化・無効化
+python3 plugins/schedule_plugin.py --enable --type analyzer --name toorpia_backend
+python3 plugins/schedule_plugin.py --disable --type analyzer --name toorpia_backend
+```
+
+#### cron統合
+
+スケジューラは設定ファイルを解析して cron エントリを自動生成し、システムの crontab に統合します。
+
+```bash
+# 自動生成される cron エントリ例
+
+# toorPIA basemap update (7th-untan) - 毎週日曜2時
+0 2 * * 0 cd /path/to/if-hub && TOORPIA_MODE=basemap_update python3 plugins/run_plugin.py run --type analyzer --name toorpia_backend --config /path/to/config.yaml --mode basemap_update >> logs/toorpia_scheduler.log 2>&1
+
+# toorPIA addplot update (7th-untan) - 10分間隔
+*/10 * * * * cd /path/to/if-hub && TOORPIA_MODE=addplot_update python3 plugins/run_plugin.py run --type analyzer --name toorpia_backend --config /path/to/config.yaml --mode addplot_update >> logs/toorpia_scheduler.log 2>&1
+```
+
+### 設定構造
+
+#### basemap更新設定
+
+basemap更新では、実行頻度とデータ期間を独立して設定できます。
+
+```yaml
+# configs/equipments/7th-untan/config.yaml
+basemap:
+  update:
+    type: "periodic"
+    schedule:
+      interval: "weekly"      # 実行頻度: daily/weekly/monthly または 7D/6H等
+      time: "02:00"           # 実行時刻 (HH:MM)
+      weekday: "sunday"       # 週次の場合の曜日
+    data:
+      lookback: "30D"         # データ期間: 30日分のデータを含む
+
+  # 固定期間モード
+  # update:
+  #   type: "fix"
+  #   data:
+  #     start: "2024-01-15T00:00:00+09:00"
+  #     end: "2024-01-22T00:00:00+09:00"
+```
+
+#### addplot更新設定
+
+addplot更新は短い間隔でのリアルタイム処理に使用されます。
+
+```yaml
+basemap:
+  addplot:
+    interval: "10m"           # 更新間隔
+    lookback_period: "10D"    # データ取得期間
+```
+
+#### 完全な設定例
+
+```yaml
+# toorPIA連携設定
+toorpia_integration:
+  enabled: true
+  api_url: "http://localhost:3000"
+  timeout: 300
+  
+  endpoints:
+    fit_transform: "/data/fit_transform"
+    addplot: "/data/addplot"
+  
+  auth:
+    session_key: "your_api_key_here"
+    auto_refresh: true
+  
+  basemap_processing:
+    parameters:
+      label: "7th-untan Basemap"
+      description: "7号機脱硫装置 基盤マップ"
+      weight_option_str: "1:0"
+      type_option_str: "1:date"
+  
+  addplot_processing:
+    parameters:
+      weight_option_str: "1:0"
+      type_option_str: "1:date"
+```
+
+### 実装パターン
+
+#### BaseAnalyzer継承
+
+```python
+from plugins.base.base_analyzer import BaseAnalyzer
+
+class ToorPIAAnalyzer(BaseAnalyzer):
+    def __init__(self, config_path: str):
+        super().__init__(config_path)
+        
+        # toorPIA固有の設定
+        toorpia_config = self.config.get('toorpia_integration', {})
+        self.api_url = toorpia_config.get('api_url', 'http://localhost:3000')
+        self.timeout = toorpia_config.get('timeout', 300)
+    
+    def prepare(self) -> bool:
+        """事前処理：データ取得とCSV準備"""
+        self.processing_mode = self._determine_processing_mode()
+        return self._fetch_equipment_data()
+    
+    def validate_config(self) -> bool:
+        """設定ファイルバリデーション"""
+        required_sections = ['toorpia_integration', 'basemap']
+        for section in required_sections:
+            if section not in self.config:
+                return False
+        return True
+    
+    def execute(self) -> Dict[str, Any]:
+        """メイン処理実行"""
+        if self.processing_mode == "basemap_update":
+            return self._execute_basemap_update()
+        elif self.processing_mode == "addplot_update":
+            return self._execute_addplot_update()
+```
+
+#### モード別実行
+
+環境変数 `TOORPIA_MODE` により実行モードを制御します。
+
+```bash
+# basemap更新モード
+TOORPIA_MODE=basemap_update python3 plugins/run_plugin.py run \
+    --type analyzer --name toorpia_backend \
+    --config configs/equipments/7th-untan/config.yaml
+
+# addplot更新モード  
+TOORPIA_MODE=addplot_update python3 plugins/run_plugin.py run \
+    --type analyzer --name toorpia_backend \
+    --config configs/equipments/7th-untan/config.yaml
+```
+
+### オフライン環境配置
+
+#### プラグインシステムの配置
+
+toorPIA Backendプラグインは、IF-HUB のオフライン配置機能に完全対応しています。
+
+```bash
+# 開発環境でのパッケージ作成
+./offline-deployment/deployment-tools/create-package.sh
+
+# パッケージに自動的に含まれる内容:
+# - plugins/schedule_plugin.py (スケジュール管理)
+# - plugins/analyzers/toorpia_backend/ (プラグイン本体)
+# - plugins/venvs/analyzers/toorpia_backend/ (仮想環境)
+# - 依存関係とメタデータ
+```
+
+#### 顧客環境での運用
+
+```bash
+# パッケージ展開後
+tar -xzf if-hub-container.tgz
+cd if-hub
+
+# プラグインスケジュールのセットアップ
+python3 plugins/schedule_plugin.py --setup --type analyzer --name toorpia_backend
+
+# 運用状況の確認
+python3 plugins/schedule_plugin.py --status --type analyzer --name toorpia_backend
+crontab -l | grep toorPIA
+```
+
+#### 新規設備追加時の操作
+
+```bash
+# 1. 設備設定ファイルを作成
+cp -r configs/equipments/example configs/equipments/new-equipment
+vim configs/equipments/new-equipment/config.yaml
+
+# 2. スケジュールに追加
+python3 plugins/schedule_plugin.py --add --config configs/equipments/new-equipment/config.yaml
+
+# 3. 確認
+python3 plugins/schedule_plugin.py --status --type analyzer --name toorpia_backend
+```
+
+### 運用とメンテナンス
+
+#### ログ監視
+
+```bash
+# プラグイン実行ログ
+tail -f logs/toorpia_scheduler.log
+
+# 個別設備ログ
+tail -f logs/7th-untan/toorpia_analyzer.log
+
+# エラーログのフィルタリング
+grep -E "(ERROR|CRITICAL)" logs/toorpia_scheduler.log
+```
+
+#### パフォーマンス監視
+
+```bash
+# スケジュール状況の確認
+python3 plugins/schedule_plugin.py --status --type analyzer --name toorpia_backend
+
+# cron実行状況
+grep "toorPIA" /var/log/syslog
+
+# システムリソース使用量
+top -p $(pgrep -f "toorpia_backend")
+```
+
+#### バックアップと復旧
+
+```bash
+# crontab設定のバックアップ
+# (スケジューラが自動的に logs/crontab_backups/ に保存)
+ls -la logs/crontab_backups/
+
+# スケジュール設定の復旧
+python3 plugins/schedule_plugin.py --setup --type analyzer --name toorpia_backend
+```
+
+### セキュリティ考慮事項
+
+#### API認証
+
+- toorPIA Backend API への接続にはセッションキーベース認証を使用
+- 設定ファイル内の認証情報は適切に保護
+- 自動セッション更新機能による長期運用対応
+
+#### アクセス制御
+
+- プラグイン実行権限の適切な設定
+- cron実行ユーザーの権限管理
+- ログファイルアクセス権の制限
+
+この実装例は、IF-HUB プラグインシステムの柔軟性と拡張性を活用し、企業の既存システムとの統合を実現するための参考となります。
+
 ## トラブルシューティング
 
 ### 一般的な問題と解決方法
