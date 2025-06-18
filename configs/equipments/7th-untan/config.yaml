@@ -1,9 +1,9 @@
 basemap:
   update:
     type: "fix"
-    interval: "10D"
-    begin: "2025-03-01T00:00:00+09:00"
-    end: "2025-03-01T00:00:00+09:00"
+    data:
+      start: "2024-01-17T00:00:00+09:00"
+      end: "2024-01-22T00:00:00+09:00"
 
   heatmap:
     effective_radius: 0.1
@@ -46,7 +46,7 @@ basemap:
 
   addplot:
     interval: "10m"
-    lookback_period: "10D"
+    lookback_period: "2H"
 
   source_tags:
     - "POW:7I1032.PV"
@@ -79,3 +79,73 @@ basemap:
 pi_integration:
   enabled: true
   # output_filename は自動生成: 7th-untan.csv
+
+# toorPIA連携設定
+toorpia_integration:
+  enabled: true
+  api_url: "http://localhost:3000"
+  timeout: 300  # seconds
+  
+  # API エンドポイント設定
+  endpoints:
+    fit_transform: "/data/fit_transform"
+    addplot: "/data/addplot"
+  
+  # 認証設定
+  auth:
+    api_key: "toorpia_1967e5ce981183c06013c09cd59074d0d7e4d6b1ece15d3c"
+    auto_refresh: true
+  
+  # basemap処理設定
+  basemap_processing:
+    mode: "fit_transform"
+    parameters:
+      label: "7th-untan"
+      description: "7号機脱硫装置 基盤マップ"
+      weight_option_str: "1:0"
+      type_option_str: "1:date"
+      # identnaパラメータ（正常領域識別）
+      identna_resolution: 100        # メッシュ解像度
+      identna_effective_radius: 0.1  # 有効半径比率
+    
+    # スケジュール設定
+    schedule:
+      trigger: "basemap_update"
+      data_period: "basemap_lookback"
+  
+  # addplot処理設定
+  addplot_processing:
+    mode: "addplot"
+    parameters:
+      weight_option_str: "1:0"
+      type_option_str: "1:date"
+      # detabnパラメータ（異常度判定）
+      detabn_max_window: 5           # 最大ウィンドウサイズ
+      detabn_rate_threshold: 1.0     # 異常率閾値
+      detabn_threshold: 0            # 正常領域閾値
+      detabn_print_score: true       # 詳細スコア情報出力
+    
+    # スケジュール設定
+    schedule:
+      trigger: "addplot_interval"
+      data_period: "addplot_lookback"
+  
+  # ログ設定
+  logging:
+    level: "INFO"
+    filename: "toorpia_analyzer.log"
+    max_size_mb: 10
+    backup_count: 5
+    console: true
+    
+  # バリデーション設定
+  validation:
+    timeout_seconds: 300
+    required_response_fields: ["message", "resdata"]
+    required_resdata_fields: ["mapNo"]
+  
+  # 状態管理
+  state:
+    last_map_no: null  # 自動更新
+    last_basemap_update: null  # 自動更新
+    last_addplot_update: null  # 自動更新
