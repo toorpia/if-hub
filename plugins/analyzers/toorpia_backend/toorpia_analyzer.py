@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import os
 import subprocess
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from ...base.base_analyzer import BaseAnalyzer
 from ...base.lock_manager import EquipmentLockManager
@@ -9,7 +10,7 @@ from ...base.temp_file_manager import TempFileManager
 from ...base.errors import (
     ConfigurationError, APIConnectionError, DataFetchError, 
     ValidationError, AuthenticationError, ProcessingModeError,
-    TempFileError, LockError, get_error_severity
+    TempFileError, LockError, PluginError, get_error_severity
 )
 from ...base.api_client import create_toorpia_client, create_ifhub_client
 
@@ -102,6 +103,20 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                     config_path=self.config_path,
                     invalid_field="toorpia_integration.api_url"
                 )
+            
+            # API認証設定の検証
+            auth_config = toorpia_config.get('auth', {})
+            if not auth_config.get('api_key'):
+                raise ConfigurationError(
+                    "Missing API key in toorpia_integration.auth config",
+                    config_path=self.config_path,
+                    invalid_field="toorpia_integration.auth.api_key"
+                )
+            
+            # APIキーフォーマットの簡易チェック
+            api_key = auth_config['api_key']
+            if not api_key.startswith('toorpia_') or len(api_key) < 40:
+                self.logger.warning("API key format may be invalid")
             
             self.logger.info("Config validation passed")
             return True
@@ -196,7 +211,6 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 error = APIConnectionError(f"API connection issue: {str(e)}")
             else:
                 # 汎用的なプラグインエラー
-                from ...base.errors import PluginError
                 error = PluginError(
                     f"Plugin execution failed: {str(e)}",
                     "EXECUTION_FAILED",
@@ -227,7 +241,6 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             basemap_config = self.config['basemap']
             
             # データ期間計算
-            from datetime import datetime, timedelta
             import dateutil.parser
             
             if self.processing_mode == "basemap_update":
@@ -351,14 +364,14 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             return False
     
     def _execute_basemap_update(self) -> Dict[str, Any]:
-        """basemap更新処理"""
+        """basemap更新処理（identna対応版）"""
         try:
             self.logger.info("Executing basemap update (fit_transform)")
             
             # CSV データ読み込み
             df = pd.read_csv(self.temp_csv_path)
             
-            # API リクエストデータ準備
+            # API リクエストデータ準備（toorpiaクライアントと同じ形式）
             columns = df.columns.tolist()
             data = df.values.tolist()
             
@@ -369,15 +382,25 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             request_data = {
                 "columns": columns,
                 "data": data,
-                "label": self.equipment_name,  # 設備名のみ
+                "label": self.equipment_name,
                 "tag": f"{self.equipment_name}_basemap",
                 "description": parameters.get('description', f"{self.equipment_name} baseline analysis"),
                 "weight_option_str": parameters.get('weight_option_str', "1:0"),
                 "type_option_str": parameters.get('type_option_str', "1:date")
             }
             
+            # identnaパラメータの追加（値がある場合のみ）
+            if parameters.get('identna_resolution') is not None:
+                request_data['identna_resolution'] = parameters['identna_resolution']
+            if parameters.get('identna_effective_radius') is not None:
+                request_data['identna_effective_radius'] = parameters['identna_effective_radius']
+            
             # API 呼び出し
             response = self._call_toorpia_api('fit_transform', request_data)
+            
+            # 正常領域生成の確認
+            if response.get('normalAreaGenerated'):
+                self.logger.info("Normal area file generated successfully")
             
             self.logger.info("Basemap update completed successfully")
             return response
@@ -387,7 +410,7 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             raise
     
     def _execute_addplot_update(self) -> Dict[str, Any]:
-        """addplot追加処理（動的basemap取得対応）"""
+        """addplot追加処理（detabn対応版）"""
         try:
             self.logger.info("Executing addplot update")
             
@@ -414,8 +437,33 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 "type_option_str": parameters.get('type_option_str', "1:date")
             }
             
+            # detabnパラメータの追加（値がある場合のみ）
+            if parameters.get('detabn_max_window') is not None:
+                request_data['detabn_max_window'] = parameters['detabn_max_window']
+            if parameters.get('detabn_rate_threshold') is not None:
+                request_data['detabn_rate_threshold'] = parameters['detabn_rate_threshold']
+            if parameters.get('detabn_threshold') is not None:
+                request_data['detabn_threshold'] = parameters['detabn_threshold']
+            if parameters.get('detabn_print_score') is not None:
+                request_data['detabn_print_score'] = parameters['detabn_print_score']
+            
             # API 呼び出し
             response = self._call_toorpia_api('addplot', request_data)
+            
+            # 異常度情報の取得とログ出力
+            abnormality_status = response.get('abnormalityStatus', 'unknown')
+            abnormality_score = response.get('abnormalityScore')
+            
+            self.logger.info(f"Abnormality detection result: status={abnormality_status}, " 
+                            f"score={abnormality_score if abnormality_score is not None else 'N/A'}")
+            
+            # 異常と判定された場合は警告レベルでログ出力
+            if abnormality_status == 'abnormal':
+                self.logger.warning(f"ABNORMAL data detected for {self.equipment_name}: "
+                                  f"score={abnormality_score}")
+                
+                # 必要に応じて通知システムとの連携をここに追加
+                # self._send_abnormal_notification(abnormality_status, abnormality_score)
             
             self.logger.info("Addplot update completed successfully")
             return response
@@ -468,12 +516,16 @@ class ToorPIAAnalyzer(BaseAnalyzer):
     def _get_session_key(self) -> str:
         """toorPIA認証セッションキー取得"""
         auth_config = self.config.get('toorpia_integration', {}).get('auth', {})
-        api_key = auth_config.get('session_key', '')  # これは実際にはAPIキー
+        api_key = auth_config.get('api_key', '')  # 'session_key' から 'api_key' に変更
         
         if not api_key:
-            raise ValueError("API key not found in configuration")
+            raise AuthenticationError(
+                "API key not found in configuration",
+                auth_type="api_key",
+                config_path=self.config_path
+            )
         
-        # APIキーを使ってセッションキーを取得
+        # APIキーを使ってセッションキーを取得（toorpiaクライアントと同じ実装）
         auth_url = f"{self.api_url}/auth/login"
         auth_data = {"apiKey": api_key}
         
@@ -494,19 +546,29 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                     self.logger.info("Authentication successful, session key obtained")
                     return session_key
                 else:
-                    raise ValueError("No session key in authentication response")
+                    raise AuthenticationError(
+                        "No session key in authentication response",
+                        auth_type="response_format",
+                        response_data=result
+                    )
             else:
                 error_msg = f"Authentication failed: {response.status_code} - {response.text}"
                 self.logger.error(error_msg)
-                raise Exception(error_msg)
+                raise AuthenticationError(
+                    error_msg,
+                    auth_type="http_error",
+                    status_code=response.status_code
+                )
                 
-        except Exception as e:
-            self.logger.error(f"Authentication error: {e}")
-            raise
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Network error during authentication: {e}")
+            raise APIConnectionError(
+                f"Failed to connect to authentication endpoint: {str(e)}",
+                api_url=auth_url
+            )
     
     def _calculate_time_range(self, update_config: Dict[str, Any]) -> tuple:
         """basemap更新時の時間範囲計算（新しい設定構造に対応）"""
-        from datetime import datetime
         import dateutil.parser
         
         update_type = update_config.get('type', 'periodic')
@@ -541,9 +603,8 @@ class ToorPIAAnalyzer(BaseAnalyzer):
         else:
             raise ValueError(f"Invalid update type '{update_type}'. Must be 'fix' or 'periodic'")
     
-    def _parse_interval_to_start_time(self, interval: str, end_time) -> 'datetime':
+    def _parse_interval_to_start_time(self, interval: str, end_time) -> datetime:
         """間隔文字列から開始時間を計算"""
-        from datetime import timedelta
         
         try:
             if interval.endswith('D') or interval.endswith('d'):
@@ -674,6 +735,19 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                         actual_data=response.get('resdata', {})
                     )
             
+            # addplotの場合は異常度情報も検証
+            if self.processing_mode == "addplot_update" and 'resdata' in response:
+                # 異常度情報が含まれている場合の追加検証
+                if 'abnormalityStatus' in response:
+                    valid_statuses = ['normal', 'abnormal', 'unknown']
+                    if response['abnormalityStatus'] not in valid_statuses:
+                        self.logger.warning(f"Unexpected abnormality status: {response['abnormalityStatus']}")
+                
+                # 異常度スコアの型チェック
+                if 'abnormalityScore' in response and response['abnormalityScore'] is not None:
+                    if not isinstance(response['abnormalityScore'], (int, float)):
+                        self.logger.warning(f"Invalid abnormality score type: {type(response['abnormalityScore'])}")
+            
             # HTTP status確認
             if 'status' in response and response['status'] != 'success':
                 self.logger.warning(f"API returned non-success status: {response['status']}")
@@ -691,9 +765,29 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 actual_data=response
             )
     
-    def _create_detailed_error_response(self, error: 'PluginError') -> Dict[str, Any]:
+    def _create_success_response(self, api_response: Dict[str, Any]) -> Dict[str, Any]:
+        """成功レスポンス生成（異常度情報を含む）"""
+        
+        response = {
+            "status": "success",
+            "equipment": self.equipment_name,
+            "timestamp": self._get_timestamp(),
+            "processing_mode": self.processing_mode,
+            "api_response": api_response
+        }
+        
+        # addplot_updateの場合は異常度情報を追加
+        if self.processing_mode == "addplot_update":
+            response["abnormality_detection"] = {
+                "status": api_response.get('abnormalityStatus', 'unknown'),
+                "score": api_response.get('abnormalityScore'),
+                "addplot_no": api_response.get('addPlotNo')
+            }
+        
+        return response
+
+    def _create_detailed_error_response(self, error: PluginError) -> Dict[str, Any]:
         """詳細エラー応答生成（PluginError対応）"""
-        from ...base.errors import PluginError
         
         severity = get_error_severity(error)
         
