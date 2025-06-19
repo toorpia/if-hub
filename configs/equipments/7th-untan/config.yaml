@@ -1,9 +1,20 @@
 basemap:
   update:
-    type: "fix"
+    # 固定期間モード（コメントアウト）
+    # type: "fix"
+    # data:
+    #   start: "2024-01-17T00:00:00+09:00"
+    #   end: "2024-01-22T00:00:00+09:00"
+    
+    # 周期モード
+    type: "periodic"
     data:
-      start: "2024-01-17T00:00:00+09:00"
-      end: "2024-01-22T00:00:00+09:00"
+      lookback: "10D"  # 過去10日間のデータを使用
+    
+    # スケジュール設定（scheduler用）
+    schedule:
+      interval: "daily"     # 毎日更新
+      time: "02:00"        # 実行時刻（深夜2時）
 
   heatmap:
     effective_radius: 0.1
