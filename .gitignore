@@ -98,6 +98,8 @@ equipment.zip
 error.log
 .clinerules/
 cline_docs/*
+memory-bank/*
+.clineignore
 
 # Plugin system specific files
 # Python cache files in plugins

@@ -144,10 +144,9 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
         // 既存のタグを更新
         console.log(`    既存タグID(整数): ${existingTag.id} を更新`);
         db.prepare(`
-          UPDATE tags SET equipment = ?, source_tag = ?, unit = ?, min = ?, max = ?
+          UPDATE tags SET source_tag = ?, unit = ?, min = ?, max = ?
           WHERE id = ?
         `).run(
-          equipmentId,
           header,
           guessUnit(header),
           min === Infinity ? 0 : min,
@@ -160,13 +159,12 @@ async function processTagData(filePath, tagId, header, timestampColumn, equipmen
         // 新しいタグを挿入
         console.log(`    新規タグ「${tagId}」を作成`);
         const stmtTag = db.prepare(`
-          INSERT INTO tags (name, equipment, source_tag, unit, min, max)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO tags (name, source_tag, unit, min, max)
+          VALUES (?, ?, ?, ?, ?)
         `);
         
         const result = stmtTag.run(
           tagId,
-          equipmentId,
           header,
           guessUnit(header),
           min === Infinity ? 0 : min,
@@ -235,7 +233,6 @@ async function importCsvToDatabase(fileInfo) {
   db.exec('DROP INDEX IF EXISTS idx_tag_data_timestamp');
   
   try {
-    const equipmentId = fileInfo.equipmentId;
     const filePath = fileInfo.path;
     
     console.log(`ファイル ${filePath} を読み込みます`);
@@ -287,54 +284,8 @@ async function importCsvToDatabase(fileInfo) {
     console.log(`  タイムスタンプ列: ${timestampColumn}`);
     console.log(`  検出されたタグ: ${tagHeaders.join(', ')}`);
     
-    // 当該設備の既存タグを取得して比較
-    const existingTags = db.prepare('SELECT name FROM tags WHERE equipment = ?').all(equipmentId)
-      .map(tag => tag.name);
-    
-    // タグ構成が変わっている場合、当該設備のデータを全削除
-    const tagsChanged = !arraysEqual(existingTags.sort(), tagHeaders.map(h => `${equipmentId}.${h}`).sort());
-    
-    // タグ構成変更時は設備データを削除（独立したトランザクションで）
-    if (tagsChanged) {
-      console.log(`  設備 ${equipmentId} のタグ構成が変更されました。既存データを削除します。`);
-      
-      // 既存のタグIDを取得
-      const tagIdsQuery = db.prepare('SELECT id FROM tags WHERE equipment = ?');
-      const tagIds = tagIdsQuery.all(equipmentId);
-      
-      // 削除が必要なタグIDリストを表示
-      console.log(`  削除対象のタグID: ${tagIds.map(t => t.id).join(', ')}`);
-      
-      if (tagIds.length > 0) {
-        db.exec('BEGIN TRANSACTION');
-        try {
-          // 重要: 最初に外部キーの対象である子テーブル(tag_data)から削除する
-          console.log(`  タグデータテーブルからデータを削除中...`);
-          const deleteDataStmt = db.prepare('DELETE FROM tag_data WHERE tag_id = ?');
-          
-          // 各タグのデータを削除
-          for (const tag of tagIds) {
-            console.log(`    タグID ${tag.id} のデータを削除`);
-            const result = deleteDataStmt.run(tag.id);
-            console.log(`    ${result.changes} 件のデータポイントを削除しました`);
-          }
-          
-          // 次にタグを削除
-          console.log(`  タグテーブルからタグを削除中...`);
-          const deleteTagsResult = db.prepare('DELETE FROM tags WHERE equipment = ?').run(equipmentId);
-          console.log(`  ${deleteTagsResult.changes} 件のタグを削除しました`);
-          
-          db.exec('COMMIT');
-          console.log(`  設備 ${equipmentId} の既存データ削除が完了しました`);
-        } catch (error) {
-          console.error(`  設備データ削除中にエラー発生: ${error.message}`);
-          db.exec('ROLLBACK');
-          throw error;
-        }
-      } else {
-        console.log(`  削除するタグがありません。`);
-      }
-    }
+    // 設備固定関連付けを削除したため、タグ構成変更の判定は不要
+    // 同名タグが存在する場合は上書きされる（最後に処理されたデータが残る）
     
     // メインのインポート処理をトランザクションで実行
     db.exec('BEGIN TRANSACTION');
@@ -369,10 +320,9 @@ async function importCsvToDatabase(fileInfo) {
         if (existingTag) {
           // 既存のタグを更新
           db.prepare(`
-            UPDATE tags SET equipment = ?, source_tag = ?, unit = ?, min = ?, max = ?
+            UPDATE tags SET source_tag = ?, unit = ?, min = ?, max = ?
             WHERE id = ?
           `).run(
-            equipmentId,
             header,
             guessUnit(header),
             min,
@@ -383,13 +333,12 @@ async function importCsvToDatabase(fileInfo) {
         } else {
           // 新しいタグを挿入
           const stmtTag = db.prepare(`
-            INSERT INTO tags (name, equipment, source_tag, unit, min, max)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tags (name, source_tag, unit, min, max)
+            VALUES (?, ?, ?, ?, ?)
           `);
           
           const result = stmtTag.run(
             tagId,
-            equipmentId,
             header,
             guessUnit(header),
             min,

@@ -83,7 +83,6 @@ IF-HUBは、SQLiteデータベースを使用して時系列データとメタ�
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  equipment TEXT NOT NULL,
   source_tag TEXT NOT NULL,
   unit TEXT,
   min REAL,
@@ -95,11 +94,12 @@ CREATE TABLE IF NOT EXISTS tags (
 |-------|------|-----------|
 | id | INTEGER | タグの一意識別子（自動採番される整数）|
 | name | TEXT | タグの名前（例: `Pump01.Temperature`）|
-| equipment | TEXT | 設備名（例: `Pump01`）|
 | source_tag | TEXT | 元のCSVカラム名（例: `Temperature`）|
 | unit | TEXT | 単位（例: `°C`）|
 | min | REAL | データの最小値 |
 | max | REAL | データの最大値 |
+
+IF-HUBのデータベース設計では、tagsテーブルは純粋なタグプールとして機能します。設備情報はデータベースに格納されず、設備とタグの関連付けは各設備のconfig.yamlファイルで管理されます。この設計により、同一のソースタグを複数の設備で共有する設備横断タグ管理が実現されています。
 
 #### tag_data テーブル
 時系列データポイントを格納します。
@@ -242,7 +242,6 @@ const sourceTag = header;
 
 stmtTag.run(
   tagId,
-  equipmentId,
   header,          // name列
   sourceTag,       // source_tag列
   guessUnit(header),

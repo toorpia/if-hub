@@ -1,174 +1,213 @@
-const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
-const chokidar = require('chokidar');
+const yaml = require('js-yaml');
 
 class EquipmentConfigManager {
   constructor() {
-    this.configs = new Map();
-    this.watchers = new Map();
-    this.configDir = path.join(process.cwd(), 'configs/equipments');
+    this.configsPath = path.join(__dirname, '../../configs/equipments');
+    this.equipmentConfigs = new Map();
+    this.lastLoadTime = null;
+    this.loadConfigs();
   }
 
   /**
-   * 指定された設備のconfig.yamlを読み込む
-   * @param {string} equipmentName - 設備名
-   * @returns {Object} 設定オブジェクト
+   * 全設備のconfig.yamlファイルを読み込む
    */
-  loadConfig(equipmentName) {
-    const configPath = path.join(this.configDir, equipmentName, 'config.yaml');
-    if (!fs.existsSync(configPath)) {
-      throw new Error(`Config file not found: ${configPath}`);
-    }
-    
+  loadConfigs() {
     try {
-      const config = yaml.load(fs.readFileSync(configPath, 'utf8'));
-      this.configs.set(equipmentName, config);
-      return config;
+      if (!fs.existsSync(this.configsPath)) {
+        console.warn(`Equipment configs directory not found: ${this.configsPath}`);
+        return;
+      }
+
+      const equipmentDirs = fs.readdirSync(this.configsPath, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name);
+
+      this.equipmentConfigs.clear();
+
+      for (const equipmentName of equipmentDirs) {
+        const configPath = path.join(this.configsPath, equipmentName, 'config.yaml');
+        
+        if (fs.existsSync(configPath)) {
+          try {
+            const configContent = fs.readFileSync(configPath, 'utf8');
+            const config = yaml.load(configContent);
+            
+            // 設備名をキーとして設定を保存
+            this.equipmentConfigs.set(equipmentName, {
+              ...config,
+              equipmentName,
+              configPath
+            });
+            
+            console.log(`Loaded config for equipment: ${equipmentName}`);
+          } catch (error) {
+            console.error(`Error loading config for ${equipmentName}:`, error.message);
+          }
+        } else {
+          console.warn(`Config file not found for equipment: ${equipmentName}`);
+        }
+      }
+
+      this.lastLoadTime = new Date();
+      console.log(`Loaded ${this.equipmentConfigs.size} equipment configurations`);
     } catch (error) {
-      throw new Error(`Failed to parse config file ${configPath}: ${error.message}`);
+      console.error('Error loading equipment configs:', error);
     }
   }
 
   /**
-   * 利用可能な全設備名を取得
-   * @returns {string[]} 設備名の配列
+   * 指定した設備の設定を取得
+   * @param {string} equipmentName - 設備名
+   * @returns {Object|null} 設備設定
    */
-  getAllEquipments() {
-    if (!fs.existsSync(this.configDir)) {
+  getEquipmentConfig(equipmentName) {
+    return this.equipmentConfigs.get(equipmentName) || null;
+  }
+
+  /**
+   * 設備名でフィルタリングしたタグリストを取得
+   * @param {string} equipmentName - 設備名
+   * @param {Array} allTags - 全タグのリスト
+   * @returns {Array} フィルタリングされたタグリスト
+   */
+  getFilteredTags(equipmentName, allTags) {
+    if (!equipmentName) {
+      return allTags;
+    }
+
+    const config = this.getEquipmentConfig(equipmentName);
+    if (!config || !config.basemap) {
+      console.warn(`No config or basemap found for equipment: ${equipmentName}`);
       return [];
     }
+
+    // source_tagsとgtagsを統合
+    const allowedTags = new Set();
     
-    return fs.readdirSync(this.configDir, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name);
+    // source_tagsを追加
+    if (config.basemap.source_tags && Array.isArray(config.basemap.source_tags)) {
+      config.basemap.source_tags.forEach(tag => allowedTags.add(tag));
+    }
+    
+    // gtagsを追加
+    if (config.basemap.gtags && Array.isArray(config.basemap.gtags)) {
+      config.basemap.gtags.forEach(gtag => allowedTags.add(gtag));
+    }
+
+    // タグをフィルタリング
+    return allTags.filter(tag => {
+      // source_tagまたはnameが許可されたタグに含まれるかチェック
+      const tagName = tag.source_tag || tag.name;
+      return allowedTags.has(tagName);
+    });
   }
 
   /**
-   * 指定設備のタグ一覧を取得
+   * 指定した設備で利用可能なsource_tagsを取得
    * @param {string} equipmentName - 設備名
-   * @param {string} tagType - 'source', 'gtag', 'all'
-   * @returns {string[]} タグ名の配列
+   * @returns {Array} source_tagsのリスト
    */
-  getTagsForEquipment(equipmentName, tagType = 'all') {
-    const config = this.configs.get(equipmentName) || this.loadConfig(equipmentName);
-    
-    const result = [];
-    
-    // ルートレベルと basemap セクションの両方をチェック
-    const sourceTags = config.source_tags || 
-                      (config.basemap && config.basemap.source_tags) || 
-                      [];
-    const gtags = config.gtags || 
-                  (config.basemap && config.basemap.gtags) || 
-                  [];
-    
-    if (tagType === 'all' || tagType === 'source') {
-      result.push(...sourceTags);
+  getSourceTags(equipmentName) {
+    const config = this.getEquipmentConfig(equipmentName);
+    if (!config || !config.basemap || !config.basemap.source_tags) {
+      return [];
     }
-    if (tagType === 'all' || tagType === 'gtag') {
-      result.push(...gtags);
-    }
-    
-    return result;
+    return config.basemap.source_tags;
   }
 
   /**
-   * 指定されたタグを使用している設備一覧を取得
-   * @param {string} tagName - タグ名
-   * @param {string} tagType - 'source', 'gtag', 'all'
-   * @returns {string[]} 設備名の配列
+   * 指定した設備で利用可能なgtagsを取得
+   * @param {string} equipmentName - 設備名  
+   * @returns {Array} gtagsのリスト
    */
-  getEquipmentsForTag(tagName, tagType = 'all') {
-    const equipments = this.getAllEquipments();
-    const result = [];
+  getGtags(equipmentName) {
+    const config = this.getEquipmentConfig(equipmentName);
+    if (!config || !config.basemap || !config.basemap.gtags) {
+      return [];
+    }
+    return config.basemap.gtags;
+  }
+
+  /**
+   * 全設備の一覧を取得
+   * @returns {Array} 設備名のリスト
+   */
+  getAllEquipments() {
+    return Array.from(this.equipmentConfigs.keys());
+  }
+
+  /**
+   * 特定のgtagがどの設備で使用されているかを取得
+   * @param {string} gtagName - gtag名
+   * @returns {Array} 設備名のリスト
+   */
+  getEquipmentsUsingGtag(gtagName) {
+    const equipments = [];
     
-    equipments.forEach(equipment => {
-      const tags = this.getTagsForEquipment(equipment, tagType);
-      if (tags.includes(tagName)) {
-        result.push(equipment);
+    for (const [equipmentName, config] of this.equipmentConfigs) {
+      if (config.basemap && 
+          config.basemap.gtags && 
+          config.basemap.gtags.includes(gtagName)) {
+        equipments.push(equipmentName);
       }
-    });
+    }
     
-    return result;
+    return equipments;
   }
 
   /**
-   * config.yamlファイルの変更監視を開始
+   * 特定のsource_tagがどの設備で使用されているかを取得
+   * @param {string} sourceTagName - source_tag名
+   * @returns {Array} 設備名のリスト
    */
-  startWatching() {
-    const equipments = this.getAllEquipments();
+  getEquipmentsUsingSourceTag(sourceTagName) {
+    const equipments = [];
     
-    equipments.forEach(equipment => {
-      const configPath = path.join(this.configDir, equipment, 'config.yaml');
-      if (fs.existsSync(configPath)) {
-        const watcher = chokidar.watch(configPath);
-        
-        watcher.on('change', () => {
-          console.log(`Config changed for equipment: ${equipment}`);
-          try {
-            this.loadConfig(equipment);
-            this.updateEquipmentTags(equipment);
-          } catch (error) {
-            console.error(`Failed to reload config for ${equipment}:`, error.message);
-          }
-        });
-        
-        this.watchers.set(equipment, watcher);
+    for (const [equipmentName, config] of this.equipmentConfigs) {
+      if (config.basemap && 
+          config.basemap.source_tags && 
+          config.basemap.source_tags.includes(sourceTagName)) {
+        equipments.push(equipmentName);
       }
-    });
-    
-    console.log(`Started watching ${this.watchers.size} equipment config files`);
-  }
-
-  /**
-   * 監視を停止
-   */
-  stopWatching() {
-    this.watchers.forEach((watcher, equipment) => {
-      watcher.close();
-      console.log(`Stopped watching config for equipment: ${equipment}`);
-    });
-    this.watchers.clear();
-  }
-
-  /**
-   * 設備のタグ関連付けをデータベースに更新
-   * @param {string} equipmentName - 設備名
-   */
-  updateEquipmentTags(equipmentName) {
-    console.log(`Equipment tags update triggered for: ${equipmentName}`);
-    
-    try {
-      // 動的にrequireして循環依存を回避
-      const { updateEquipmentTags } = require('../scripts/init-equipment-data');
-      updateEquipmentTags(equipmentName);
-      console.log(`Successfully updated equipment tags for: ${equipmentName}`);
-    } catch (error) {
-      console.error(`Failed to update equipment tags for ${equipmentName}:`, error.message);
     }
+    
+    return equipments;
   }
 
   /**
-   * キャッシュされた設定をクリア
+   * 設定ファイルをリロード（開発・デバッグ用）
    */
-  clearCache() {
-    this.configs.clear();
+  reloadConfigs() {
+    console.log('Reloading equipment configurations...');
+    this.loadConfigs();
   }
 
   /**
-   * 設備の設定情報を取得（キャッシュ優先）
-   * @param {string} equipmentName - 設備名
-   * @returns {Object|null} 設定オブジェクトまたはnull
+   * 設定の統計情報を取得
+   * @returns {Object} 統計情報
    */
-  getConfig(equipmentName) {
-    try {
-      return this.configs.get(equipmentName) || this.loadConfig(equipmentName);
-    } catch (error) {
-      console.error(`Failed to get config for ${equipmentName}:`, error.message);
-      return null;
+  getStats() {
+    const stats = {
+      totalEquipments: this.equipmentConfigs.size,
+      lastLoadTime: this.lastLoadTime,
+      equipments: {}
+    };
+
+    for (const [equipmentName, config] of this.equipmentConfigs) {
+      stats.equipments[equipmentName] = {
+        sourceTagsCount: config.basemap?.source_tags?.length || 0,
+        gtagsCount: config.basemap?.gtags?.length || 0,
+        hasBasemap: !!config.basemap
+      };
     }
+
+    return stats;
   }
 }
 
-module.exports = EquipmentConfigManager;
+// シングルトンインスタンスをエクスポート
+const equipmentConfigManager = new EquipmentConfigManager();
+
+module.exports = equipmentConfigManager;

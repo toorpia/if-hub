@@ -9,6 +9,7 @@ services:
       - "${EXTERNAL_PORT:-3001}:3000"  # 環境変数EXTERNAL_PORTがない場合は3001を使用
     volumes:
       - ./src:/app/src
+      - ./configs:/app/configs:ro           # 設備設定ファイル（読み取り専用）
       - ./static_equipment_data:/app/static_equipment_data
       - ./tag_metadata:/app/tag_metadata
       - ./gtags:/app/gtags        # gtag定義とカスタム実装
