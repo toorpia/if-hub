@@ -16,6 +16,22 @@
 | `ingester/tools/` | `*.py`, `*.sh`, `*.md` | `offline-deployment/if-hub/tools/` | PI関連の取り込み・設定ツール |
 | `fetcher/dist/bin/` | `if-hub-fetcher` | `offline-deployment/if-hub/tools/` | IF-Hubからのデータ抽出バイナリ |
 
+### プラグインシステム統合
+
+パッケージ作成時に、プラグインシステムを自動検出・統合します：
+
+| 収集元 | 収集対象 | 配布先 | 説明 |
+|--------|----------|--------|------|
+| `plugins/` | プラグイン実行システム | `offline-deployment/if-hub/plugins/` | プラグイン実行環境 |
+| `plugins/venvs/` | 仮想環境 | `offline-deployment/if-hub/plugins/venvs/` | 事前構築済み仮想環境 |
+| `plugins/venv_management/` | 管理スクリプト | `offline-deployment/if-hub/plugins/venv_management/` | 仮想環境管理ツール |
+
+**統合内容:**
+- プラグイン実行システム（`run_plugin.py`）
+- 仮想環境の完全パッケージング（symlink解決済み）
+- プラグインメタデータファイル
+- 依存関係管理スクリプト
+
 
 ### 自動判定機能
 
@@ -102,6 +118,44 @@ cd if-hub
 ./setup-update.sh    # アプリケーション更新
 ```
 
+### プラグインシステムの運用（顧客環境）
+
+#### プラグインシステム初期確認
+
+```bash
+cd if-hub
+
+# プラグインシステムのディレクトリ構造確認
+ls -la plugins/
+ls -la plugins/venvs/
+
+# 利用可能プラグイン一覧表示
+python3 plugins/run_plugin.py list
+```
+
+#### プラグイン実行
+
+```bash
+# プラグイン実行（例：分析系プラグイン）
+python3 plugins/run_plugin.py --type analyzer --name {プラグイン名} \
+  --config configs/equipments/{設備名}/config.yaml --mode {実行モード}
+
+# 例：toorpia_backendプラグインの実行
+python3 plugins/run_plugin.py --type analyzer --name toorpia_backend \
+  --config configs/equipments/7th-untan/config.yaml --mode addplot_update
+```
+
+#### プラグイン状態確認
+
+```bash
+# プラグイン状態確認
+python3 plugins/run_plugin.py --type analyzer --name {プラグイン名} \
+  --config configs/equipments/{設備名}/config.yaml --mode status
+
+# プラグインログ確認
+cat plugins/logs/{プラグイン名}.log
+```
+
 ## トラブルシューティング
 
 ### create-package.sh でエラーが発生する場合
@@ -141,6 +195,54 @@ docker logs if-hub       # ログの確認
 # ログを確認
 docker logs if-hub
 docker logs if-hub-pi-ingester
+```
+
+### プラグインシステム関連エラー
+
+**エラー:** `プラグイン一覧が表示されない`
+```bash
+# 解決方法
+ls -la plugins/                    # ディレクトリ存在確認
+chmod +x plugins/run_plugin.py     # 実行権限付与
+python3 plugins/run_plugin.py list # 再実行
+```
+
+**エラー:** `仮想環境が見つからない`
+```bash
+# 解決方法
+ls -la plugins/venvs/analyzers/    # 仮想環境確認
+# 仮想環境が存在しない場合は、パッケージ再作成が必要
+```
+
+**エラー:** `プラグイン実行でPython依存関係エラー`
+```bash
+# 解決方法
+# 仮想環境のPythonパス確認
+plugins/venvs/analyzers/{プラグイン名}/bin/python --version
+
+# メタデータファイル確認
+cat plugins/analyzers/{プラグイン名}/plugin_meta.yaml
+```
+
+**エラー:** `プラグイン実行タイムアウト`
+```bash
+# 解決方法
+# プラグインログ確認
+cat plugins/logs/{プラグイン名}.log
+
+# 手動でプラグインスクリプト実行テスト
+plugins/venvs/analyzers/{プラグイン名}/bin/python \
+  plugins/analyzers/{プラグイン名}/run.py configs/equipments/{設備名}/config.yaml --mode status
+```
+
+**エラー:** `プラグインメタデータ読み込み失敗`
+```bash
+# 解決方法
+# メタデータファイルの文法確認
+python3 -c "import yaml; yaml.safe_load(open('plugins/analyzers/{プラグイン名}/plugin_meta.yaml'))"
+
+# ファイル権限確認
+chmod 644 plugins/analyzers/{プラグイン名}/plugin_meta.yaml
 ```
 
 ## ファイル構成
