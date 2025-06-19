@@ -1,0 +1,10 @@
+# Pump01 設備設定
+basemap:
+  source_tags:
+    - "Flow"
+    - "PowerConsumption"
+    - "Temperature"
+  
+  gtags:
+    - "EfficiencyIndex"
+    - "TempMA"

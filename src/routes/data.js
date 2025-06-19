@@ -7,6 +7,8 @@ const { getGtagData, executeProcess } = require('../utils/gtag-utils');
 const { getTimeShiftedData } = require('../utils/time-utils');
 const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('../utils/data-processing');
 const config = require('../config');
+const equipmentConfigManager = require('../services/equipment-config-manager');
+const { sortTagsByConfigOrder, sortTagIdsByConfigOrder } = require('../utils/config-order-sort');
 
 // 特定タグのデータ取得
 router.get('/api/data/:tagName', async (req, res) => {
@@ -507,36 +509,53 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
   } = req.query;
   
   try {
-    // 設備の存在チェック
-    const equipmentExists = db.prepare(
-      'SELECT COUNT(*) as count FROM tags WHERE equipment = ?'
-    ).get(equipmentId).count > 0;
-    
-    if (!equipmentExists) {
+    // 設備の存在チェック（config.yamlベース）
+    const equipmentNames = equipmentConfigManager.getAllEquipments();
+    if (!equipmentNames.includes(equipmentId)) {
       return res.status(404).json({ error: `Equipment ${equipmentId} not found` });
     }
     
-    // 設備に関連する通常タグを取得してソート
-    const tags = db.prepare('SELECT id, name FROM tags WHERE equipment = ? ORDER BY id').all(equipmentId);
-    const normalTagIds = tags.map(tag => tag.id);
-    const tagIdToName = new Map(tags.map(tag => [tag.id, tag.name]));
-    
-    // gtagを含める場合、IDでソートして取得
+    // config.yamlから設備に関連するタグを取得
+    const sourceTags = equipmentConfigManager.getSourceTags(equipmentId);
     const shouldIncludeGtags = includeGtags === 'true';
-    let gtagIds = [];
-    let gtagIdToName = new Map();
+    const gtags = shouldIncludeGtags ? equipmentConfigManager.getGtags(equipmentId) : [];
     
-    if (shouldIncludeGtags) {
-      const gtags = db.prepare('SELECT id, name FROM gtags WHERE equipment = ? ORDER BY id').all(equipmentId);
-      gtagIds = gtags.map(gtag => gtag.id);
-      gtagIdToName = new Map(gtags.map(gtag => [gtag.id, gtag.name]));
+    if (sourceTags.length === 0 && gtags.length === 0) {
+      return res.status(404).json({ error: `No tags found for equipment ${equipmentId}` });
+    }
+    
+    // タグ名からタグIDとgtagIDを取得
+    const normalTagIds = [];
+    const tagIdToName = new Map();
+    const gtagIds = [];
+    const gtagIdToName = new Map();
+    
+    // 通常タグの処理
+    for (const tagName of sourceTags) {
+      const tag = db.prepare('SELECT id, name FROM tags WHERE source_tag = ? OR name = ?').get(tagName, tagName);
+      if (tag) {
+        normalTagIds.push(tag.id);
+        tagIdToName.set(tag.id, tag.name);
+      }
+    }
+    
+    // gtagの処理
+    for (const gtagName of gtags) {
+      const gtag = db.prepare('SELECT id, name FROM gtags WHERE name = ?').get(gtagName);
+      if (gtag) {
+        gtagIds.push(gtag.id);
+        gtagIdToName.set(gtag.id, gtag.name);
+      }
     }
     
     // 全タグIDを配列にまとめる（通常タグが先、gtagが後）
-    const allTagIds = [...normalTagIds, ...gtagIds];
+    let allTagIds = [...normalTagIds, ...gtagIds];
+    
+    // config.yaml順序でソート
+    allTagIds = sortTagIdsByConfigOrder(allTagIds, equipmentId, tagIdToName, gtagIdToName);
     
     if (allTagIds.length === 0) {
-      return res.status(404).json({ error: `No tags found for equipment ${equipmentId}` });
+      return res.status(404).json({ error: `No valid tags found for equipment ${equipmentId}` });
     }
     
     // 表示名オプションの処理
