@@ -1,0 +1,7 @@
+# Compressor01 設備設定
+basemap:
+  source_tags:
+    - "Temperature"
+    - "Pressure"
+    - "Current"
+    - "Vibration"

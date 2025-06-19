@@ -1,0 +1,10 @@
+# Tank01 設備設定
+basemap:
+  source_tags:
+    - "Level"
+    - "InFlow"
+    - "OutFlow"
+  
+  gtags:
+    - "LevelZscore"
+    - "PredictedLevel"

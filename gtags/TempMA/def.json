@@ -1,8 +1,8 @@
 {
-  "name": "Pump01.TempMA",
+  "name": "TempMA",
   "type": "moving_average",
-  "inputs": ["Pump01.Temperature"],
+  "inputs": ["Temperature"],
   "window": 5,
-  "description": "ポンプ01温度の移動平均",
+  "description": "温度の移動平均",
   "unit": "°C"
 }

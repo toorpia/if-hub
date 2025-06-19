@@ -345,7 +345,7 @@ async function importCsvToDatabase(fileInfo) {
       
       // タグごとに処理（CSVの再読み込みなし）
       for (const header of tagHeaders) {
-        const tagId = `${equipmentId}.${header}`;
+        const tagId = header; // 設備名を含まない形式に変更
         console.log(`  タグ ${tagId} を処理中...`);
         
         // メモリ内のデータからタグ値を抽出

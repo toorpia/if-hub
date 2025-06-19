@@ -57,12 +57,25 @@ function initDatabase() {
     )
   `);
   
+  // 設備とタグの関連付けテーブル（多対多関係）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS equipment_tags (
+      equipment_name TEXT NOT NULL,
+      tag_name TEXT NOT NULL,
+      tag_type TEXT NOT NULL CHECK (tag_type IN ('source', 'gtag')),
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (equipment_name, tag_name, tag_type)
+    )
+  `);
+
   // インデックス作成（検索高速化のため）
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_tags_equipment ON equipment_tags(equipment_name)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_tags_tag ON equipment_tags(tag_name)`);
 
   console.log('データベーステーブルの初期化が完了しました');
 }
