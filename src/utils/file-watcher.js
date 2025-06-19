@@ -139,7 +139,6 @@ function detectChangedFiles() {
         return {
           path: filePath,
           name: file,
-          equipmentId: path.basename(file, '.csv'),
           checksum: calculateChecksum(filePath)
         };
       })

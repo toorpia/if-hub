@@ -21,12 +21,11 @@ const db = sqlite3(DB_PATH);
 
 // テーブルの作成
 function initDatabase() {
-  // タグメタデータテーブル
+  // タグメタデータテーブル（equipment列を削除）
   db.exec(`
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
-      equipment TEXT NOT NULL,
       source_tag TEXT NOT NULL,
       unit TEXT,
       min REAL,
@@ -70,7 +69,6 @@ function initDatabase() {
 
   // インデックス作成（検索高速化のため）
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)`);

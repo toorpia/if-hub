@@ -192,6 +192,178 @@ IF-HUBは、ファイル変更検出のために高度なチェックサム履�
 
 `tag_metadata/`ディレクトリ内のタグメタデータファイルに対しても同様のチェックサム履歴管理を適用しており、`translations_ja.csv`などのファイルが更新された場合も正確に検出・処理されます。
 
+## 設備設定ファイル（config.yaml）の管理
+
+### 概要
+
+IF-HUBでは、設備とタグの関連付けをconfig.yamlファイルで管理します。このファイルは設備・タグ関連付けの「真実の源」として機能し、API応答やデータフィルタリングの基準となります。
+
+### config.yamlの構造
+
+各設備のconfig.yamlファイルは以下の構造を持ちます：
+
+```yaml
+basemap:
+  source_tags:
+    - "Flow"
+    - "PowerConsumption"
+    - "Temperature"
+  gtags:
+    - "EfficiencyIndex"
+    - "TempMA"
+```
+
+- **source_tags**: この設備で利用可能な基本タグのリスト
+- **gtags**: この設備で利用可能な計算生成タグ（gtag）のリスト
+
+### ファイル配置
+
+設備設定ファイルは以下のディレクトリ構造で配置します：
+
+```
+configs/equipments/
+├── Pump01/config.yaml
+├── Tank01/config.yaml
+├── Compressor01/config.yaml
+├── Reactor01/config.yaml
+└── 7th-untan/config.yaml
+```
+
+### 重要な運用ルール
+
+**⚠️ 重要**: config.yamlファイルを変更した後は、必ずサーバーの再起動が必要です。
+
+#### 設定変更の手順
+
+1. **設定ファイルの編集**
+   ```bash
+   vi configs/equipments/Pump01/config.yaml
+   ```
+
+2. **サーバー再起動**
+   ```bash
+   docker compose restart
+   ```
+
+3. **動作確認**
+   ```bash
+   # 設備一覧の確認
+   curl "http://localhost:3001/api/equipment"
+   
+   # 設備フィルタリングの確認
+   curl "http://localhost:3001/api/tags?equipment=Pump01&includeGtags=true"
+   ```
+
+#### 代替の再起動方法
+
+```bash
+# 完全な再起動
+docker compose down && docker compose up -d
+
+# 特定コンテナのみ再起動
+docker restart if-hub
+```
+
+### 新しい設備の追加
+
+新規設備を追加する場合は、以下の手順で実施します：
+
+1. **config.yamlファイル作成**
+   ```bash
+   mkdir -p configs/equipments/新設備名
+   vi configs/equipments/新設備名/config.yaml
+   ```
+
+2. **設定内容記述**
+   ```yaml
+   basemap:
+     source_tags:
+       - "タグ名1"
+       - "タグ名2"
+     gtags:
+       - "gtag名1"
+       - "gtag名2"
+   ```
+
+3. **サーバー再起動**
+   ```bash
+   docker compose restart
+   ```
+
+4. **動作確認**
+   ```bash
+   # 新設備が認識されることを確認
+   curl "http://localhost:3001/api/equipment"
+   
+   # 新設備のタグフィルタリング確認
+   curl "http://localhost:3001/api/tags?equipment=新設備名&includeGtags=true"
+   ```
+
+### 設備横断タグの管理
+
+config.yamlベースのシステムでは、同一タグを複数設備で共有できます：
+
+```yaml
+# configs/equipments/Pump01/config.yaml
+basemap:
+  source_tags:
+    - "UTIL:STEAM_PRESSURE"  # ユーティリティタグ
+    - "Flow"
+
+# configs/equipments/Tank01/config.yaml  
+basemap:
+  source_tags:
+    - "UTIL:STEAM_PRESSURE"  # 同じユーティリティタグ
+    - "Level"
+```
+
+この機能により、複数の設備で共通して使用されるユーティリティタグや環境データを効率的に管理できます。
+
+### config.yaml関連のトラブルシューティング
+
+#### 設備が認識されない場合
+
+1. **config.yamlファイルの存在確認**
+   ```bash
+   ls -la configs/equipments/設備名/config.yaml
+   ```
+
+2. **YAMLファイルの構文確認**
+   ```bash
+   # Python使用
+   python -c "import yaml; yaml.safe_load(open('configs/equipments/Pump01/config.yaml'))"
+   
+   # Node.js使用
+   node -e "console.log(require('yaml').parse(require('fs').readFileSync('configs/equipments/Pump01/config.yaml', 'utf8')))"
+   ```
+
+3. **Dockerマウント確認**
+   ```bash
+   docker exec -it if-hub ls -la /app/configs/equipments/
+   ```
+
+4. **サーバーログ確認**
+   ```bash
+   docker logs if-hub | grep -i "loaded config"
+   ```
+
+#### フィルタリングが動作しない場合
+
+1. **設備名の正確性確認**
+   ```bash
+   curl "http://localhost:3001/api/equipment"
+   ```
+
+2. **config.yamlの内容確認**
+   - source_tagsセクションの存在
+   - gtagsセクションの存在
+   - タグ名の正確性
+
+3. **サーバー再起動実施**
+   ```bash
+   docker compose restart
+   ```
+
 ## タグ表示名の管理
 
 ### translationsファイルの配置
@@ -291,17 +463,33 @@ gtags/
 
 この構造により、各gtagは自己完結した単位として管理され、必要に応じてカスタム実装も含めることができます。
 
+### gtag名の新形式
+
+**重要**: IF-HUBでは、gtag名から設備名を除去した新形式を採用しています：
+
+- **旧形式**: `Pump01.EfficiencyIndex`
+- **新形式**: `EfficiencyIndex`
+
+### gtag定義とconfig.yamlの関係
+
+gtag管理は以下の2つのファイルで分離管理されています：
+
+1. **gtag定義**: `gtags/EfficiencyIndex/def.json`で計算ロジックを定義
+2. **設備関連付け**: `configs/equipments/Pump01/config.yaml`のgtagsセクションで関連付け
+
+この分離により、同一gtag定義を複数設備で共有できます。
+
 ### gtag定義ファイル（def.json）の例
 
 #### 計算タイプ
 
 ```json
 {
-  "name": "Pump01.Efficiency",
+  "name": "EfficiencyIndex",
   "type": "calculation",
-  "inputs": ["Pump01.Flow", "Pump01.Power"],
+  "inputs": ["Flow", "Power"],
   "expression": "(inputs[0] / inputs[1])",
-  "description": "ポンプ効率（流量/消費電力）",
+  "description": "効率指数（流量/消費電力）",
   "unit": ""
 }
 ```
@@ -310,11 +498,11 @@ gtags/
 
 ```json
 {
-  "name": "Pump01.TempMA",
+  "name": "TempMA",
   "type": "moving_average",
-  "inputs": ["Pump01.Temperature"],
+  "inputs": ["Temperature"],
   "window": 5,
-  "description": "ポンプ01温度の移動平均",
+  "description": "温度の移動平均",
   "unit": "°C"
 }
 ```
@@ -323,11 +511,11 @@ gtags/
 
 ```json
 {
-  "name": "Tank01.LevelZscore",
+  "name": "LevelZscore",
   "type": "zscore",
-  "inputs": ["Tank01.Level"],
+  "inputs": ["Level"],
   "window": 24,
-  "description": "タンク01水位のZ-score（異常検知用）",
+  "description": "水位のZ-score（異常検知用）",
   "unit": ""
 }
 ```
@@ -336,39 +524,76 @@ gtags/
 
 ```json
 {
-  "name": "Tank01.PredictedLevel",
+  "name": "PredictedLevel",
   "type": "custom",
-  "inputs": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "inputs": ["Level", "InFlow", "OutFlow"],
   "implementation": "bin/predict_level.py",
   "function": "predict_future_level",
   "params": {
     "prediction_minutes": 30
   },
-  "description": "タンク01の30分後の水位予測",
+  "description": "30分後の水位予測",
   "unit": "m"
 }
 ```
 
 ### 新しいgtagの追加方法
 
-1. `gtags/`ディレクトリ内に新しいgtag名のディレクトリを作成
+新しいgtagを追加する場合は、以下の手順で実施します：
+
+1. **gtag定義の作成**
    ```bash
-   mkdir -p gtags/Pump01.NewMetric
+   mkdir -p gtags/NewMetric
+   vim gtags/NewMetric/def.json
    ```
 
-2. 定義ファイル（def.json）を作成
-   ```bash
-   vim gtags/Pump01.NewMetric/def.json
+2. **定義ファイル（def.json）の記述**
+   ```json
+   {
+     "name": "NewMetric",
+     "type": "calculation",
+     "inputs": ["Flow", "Power"],
+     "expression": "(inputs[0] * inputs[1])",
+     "description": "新しい指標",
+     "unit": ""
+   }
    ```
 
-3. 必要に応じてカスタム実装を追加
-   ```bash
-   mkdir -p gtags/Pump01.NewMetric/bin
-   vim gtags/Pump01.NewMetric/bin/custom_calc.py
-   chmod +x gtags/Pump01.NewMetric/bin/custom_calc.py
+3. **設備設定への追加**
+   ```yaml
+   # configs/equipments/Pump01/config.yaml
+   basemap:
+     source_tags:
+       - "Flow"
+       - "Power"
+     gtags:
+       - "EfficiencyIndex"
+       - "TempMA"
+       - "NewMetric"  # 新しいgtagを追加
    ```
 
-4. サーバーを再起動するか、しばらく待つと自動検出されます
+4. **必要に応じてカスタム実装を追加**
+   ```bash
+   mkdir -p gtags/NewMetric/bin
+   vim gtags/NewMetric/bin/custom_calc.py
+   chmod +x gtags/NewMetric/bin/custom_calc.py
+   ```
+
+5. **サーバー再起動**
+   ```bash
+   docker compose restart
+   ```
+
+6. **動作確認**
+   ```bash
+   # gtagが認識されることを確認
+   curl "http://localhost:3001/api/tags?equipment=Pump01&includeGtags=true"
+   
+   # 特定のgtagをテスト
+   curl "http://localhost:3001/api/gtags/NewMetric?equipment=Pump01"
+   ```
+
+**注意**: config.yamlファイルを変更した場合は、必ずサーバーの再起動が必要です。
 
 ### 柔軟なタグ参照
 
@@ -743,21 +968,65 @@ sqlite3 db/if_hub.db < backup_20230101.sql
 
 3. `tag_metadata`ディレクトリのtranslationsファイルで、source_tag列が正しく定義されているか確認
 
+#### config.yaml関連の問題
+
+1. **設備が認識されない場合**
+   ```bash
+   # config.yamlファイルの存在確認
+   ls -la configs/equipments/*/config.yaml
+   
+   # YAML構文チェック
+   python -c "import yaml; yaml.safe_load(open('configs/equipments/Pump01/config.yaml'))"
+   ```
+
+2. **設備フィルタリングが動作しない場合**
+   ```bash
+   # サーバー再起動の実行
+   docker compose restart
+   
+   # EquipmentConfigManagerのログ確認
+   docker logs if-hub | grep -i "loaded config"
+   ```
+
+3. **gtagが表示されない場合**
+   ```bash
+   # config.yamlのgtagsセクション確認
+   cat configs/equipments/Pump01/config.yaml
+   
+   # gtag定義ファイルの存在確認
+   ls -la gtags/EfficiencyIndex/def.json
+   ```
+
 #### gtag関連の問題
 
-1. gtag定義が正しいか確認
+1. **gtag定義が正しいか確認**
    ```bash
-   cat gtags/Pump01.TempMA/def.json
+   # 新形式のgtag定義確認
+   cat gtags/TempMA/def.json
    ```
 
-2. gtag一覧を確認
+2. **gtag一覧を確認**
    ```bash
-   curl http://localhost:3001/api/tags?includeGtags=true
+   # 設備フィルタリングを含むgtag一覧
+   curl "http://localhost:3001/api/tags?equipment=Pump01&includeGtags=true"
    ```
 
-3. 特定のgtagをテスト
+3. **特定のgtagをテスト**
    ```bash
-   curl http://localhost:3001/api/gtags/Pump01.TempMA
+   # 新形式でのgtag取得（設備指定あり）
+   curl "http://localhost:3001/api/gtags/TempMA?equipment=Pump01"
    ```
 
-4. APIレスポンスのエラーメッセージを確認
+4. **gtag定義とconfig.yaml関連付けの確認**
+   ```bash
+   # 設備のconfig.yamlでgtagが定義されているか確認
+   grep -A5 "gtags:" configs/equipments/Pump01/config.yaml
+   
+   # gtag定義ディレクトリの存在確認
+   ls -la gtags/TempMA/
+   ```
+
+5. **APIレスポンスのエラーメッセージを確認**
+   - gtag名の誤記（設備名が含まれていないか）
+   - 対象設備でgtagが有効化されているか
+   - サーバー再起動後の動作確認

@@ -3,18 +3,28 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { getTagsMetadata } = require('../utils/tag-utils');
+const equipmentConfigManager = require('../services/equipment-config-manager');
+const { sortTagsByConfigOrder } = require('../utils/config-order-sort');
 
 // 設備一覧
 router.get('/api/equipment', (req, res) => {
   const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false', includeGtags = 'true' } = req.query;
   
   try {
-    // 設備情報を取得
-    const equipment = db.prepare(`
-      SELECT equipment as id, equipment as name, COUNT(*) as tagCount
-      FROM tags
-      GROUP BY equipment
-    `).all();
+    // config.yamlから設備情報を取得
+    const equipmentNames = equipmentConfigManager.getAllEquipments();
+    const equipment = equipmentNames.map(name => {
+      const sourceTags = equipmentConfigManager.getSourceTags(name);
+      const gtags = equipmentConfigManager.getGtags(name);
+      
+      return {
+        id: name,
+        name,
+        sourceTags: sourceTags.length,
+        gtags: gtags.length,
+        totalTags: sourceTags.length + gtags.length
+      };
+    });
     
     const shouldIncludeTags = includeTags === 'true';
     const shouldIncludeGtags = includeGtags === 'true';
@@ -26,31 +36,50 @@ router.get('/api/equipment', (req, res) => {
       
       // 各設備のタグ情報を取得
       for (const equip of equipment) {
-        // 設備に関連するタグを取得
-        const tags = db.prepare('SELECT * FROM tags WHERE equipment = ?').all(equip.id);
+        const equipmentName = equip.id;
         
-        // 設備に関連するgtagを取得
+        // config.yamlから設備に関連するタグを取得
+        const sourceTagNames = equipmentConfigManager.getSourceTags(equipmentName);
+        const gtagNames = shouldIncludeGtags ? equipmentConfigManager.getGtags(equipmentName) : [];
+        
+        // 通常タグをデータベースから取得
+        const tags = [];
+        for (const tagName of sourceTagNames) {
+          const tag = db.prepare('SELECT * FROM tags WHERE source_tag = ? OR name = ?').get(tagName, tagName);
+          if (tag) {
+            // 設備情報を追加
+            const equipments = equipmentConfigManager.getEquipmentsUsingSourceTag(tag.source_tag || tag.name);
+            tags.push({
+              ...tag,
+              equipments: equipments
+            });
+          }
+        }
+        
+        // gtagをデータベースから取得
         let gtags = [];
-        if (shouldIncludeGtags) {
-          gtags = db.prepare('SELECT * FROM gtags WHERE equipment = ?').all(equip.id);
-          
-          // gtagをタグ形式に変換
-          gtags = gtags.map(gtag => {
+        for (const gtagName of gtagNames) {
+          const gtag = db.prepare('SELECT * FROM gtags WHERE name = ?').get(gtagName);
+          if (gtag) {
             const definition = JSON.parse(gtag.definition);
-            return {
+            const equipments = equipmentConfigManager.getEquipmentsUsingGtag(gtag.name);
+            gtags.push({
               id: gtag.id,
-              equipment: gtag.equipment,
+              equipments: equipments,
               name: gtag.name,
               unit: gtag.unit || '',
               description: gtag.description || '',
               is_gtag: true,
               type: gtag.type
-            };
-          });
+            });
+          }
         }
         
         // 通常タグとgtagを結合
-        const allTags = [...tags, ...gtags];
+        let allTags = [...tags, ...gtags];
+        
+        // config.yaml順序でソート
+        allTags = sortTagsByConfigOrder(allTags, equipmentName);
         
         // タグに表示名を含める場合
         if (shouldDisplay) {
