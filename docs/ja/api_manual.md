@@ -190,7 +190,7 @@ GET /api/tags
   "tags": [
     {
       "id": "Pump01.Temperature",
-      "equipment": "Pump01",
+      "equipments": ["Pump01"],
       "name": "Temperature",
       "source_tag": "Temperature",
       "unit": "°C",
@@ -202,6 +202,10 @@ GET /api/tags
   ]
 }
 ```
+
+**タグ順序について**: 設備フィルタリング時（`equipment`パラメータ指定時）、タグはその設備のconfig.yamlファイルで定義された順序で返されます。これにより、CSVエクスポートやデータ表示において一貫した順序でタグが配列されます。
+
+**設備横断タグ管理**: 同一のソースタグを複数の設備で利用することができます。例えば、「Temperature」というソースタグが複数の設備で使用されている場合、`equipments`フィールドに関連する全ての設備が配列として含まれます。
 
 ### ソースタグによるタグ検索
 
@@ -234,7 +238,7 @@ GET /api/tags/sourceTag/:sourceTag
   "tags": [
     {
       "id": "Pump01.Temperature",
-      "equipment": "Pump01",
+      "equipments": ["Pump01"],
       "name": "Temperature",
       "source_tag": "Temperature",
       "unit": "°C",
@@ -242,7 +246,7 @@ GET /api/tags/sourceTag/:sourceTag
     },
     {
       "id": "Pump02.Temperature",
-      "equipment": "Pump02",
+      "equipments": ["Pump02"],
       "name": "Temperature",
       "source_tag": "Temperature",
       "unit": "°C",
@@ -296,7 +300,7 @@ GET /api/equipment
       "tags": [
         {
           "id": "Pump01.Temperature",
-          "equipment": "Pump01",
+          "equipments": ["Pump01"],
           "name": "Temperature",
           "source_tag": "Temperature",
           "unit": "°C",
@@ -305,7 +309,7 @@ GET /api/equipment
         },
         {
           "id": "Pump01.Pressure",
-          "equipment": "Pump01",
+          "equipments": ["Pump01"],
           "name": "Pressure",
           "source_tag": "Pressure",
           "unit": "kPa",
@@ -931,7 +935,6 @@ IF-HUBは、効率的なデータ管理のために最適化されたデータ�
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  equipment TEXT NOT NULL,
   source_tag TEXT NOT NULL,
   unit TEXT,
   min REAL,

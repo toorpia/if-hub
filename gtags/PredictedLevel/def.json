@@ -1,9 +1,9 @@
 {
-  "name": "Tank01.PredictedLevel",
+  "name": "PredictedLevel",
   "type": "custom",
-  "inputs": ["Tank01.Level", "Tank01.InFlow", "Tank01.OutFlow"],
+  "inputs": ["Level", "InFlow", "OutFlow"],
   "prog": "bin/predict_level.py",
   "args": ["--prediction_minutes=30"],
-  "description": "タンク01の30分後の水位予測",
+  "description": "30分後の水位予測",
   "unit": "m"
 }
