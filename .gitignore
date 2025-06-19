@@ -97,7 +97,6 @@ equipment.csv
 equipment.zip
 error.log
 .clinerules/
-cline_docs/*
 
 # Plugin system specific files
 # Python cache files in plugins
@@ -145,9 +144,3 @@ plugins/**/tmp/
 plugins/**/temp/
 plugins/**/*.tmp
 plugins/**/*.temp
-
-# temporary csv data
-7th-untan-add.csv
-7th-untan-full.csv
-7th-untan.csv
-lfu.csv
