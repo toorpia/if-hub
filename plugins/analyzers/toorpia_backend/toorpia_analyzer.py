@@ -248,10 +248,13 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 update_config = basemap_config.get('update', {})
                 start_time, end_time = self._calculate_time_range(update_config)
             else:  # addplot_update
-                # addplotテスト用: basemap期間から少量データを取得
-                start_time = dateutil.parser.parse("2024-01-15T10:00:00+09:00")
-                end_time = dateutil.parser.parse("2024-01-15T10:10:00+09:00")
-                self.logger.info("Using test data period for addplot (10 minutes from basemap period)")
+                # addplot更新の場合は addplot 設定を使用
+                addplot_config = basemap_config.get('addplot', {})
+                lookback_period = addplot_config.get('lookback_period', '2H')
+                
+                end_time = datetime.now()
+                start_time = self._parse_interval_to_start_time(lookback_period, end_time)
+                self.logger.info(f"Using addplot data period: {lookback_period} lookback from current time")
             
             # ISO形式に変換
             start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -292,8 +295,8 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 
                 # source_tagまたはnameをカラム名として使用
                 if tag.get('is_gtag', False):
-                    # gtagの場合はnameを使用
-                    column_name = tag_name.split('.')[-1] if '.' in tag_name else tag_name
+                    # gtagの場合はnameをそのまま使用（設備名はもう含まれていない）
+                    column_name = tag_name
                 else:
                     # 通常タグの場合はsource_tagを使用
                     column_name = tag.get('source_tag', tag_name)
@@ -370,6 +373,16 @@ class ToorPIAAnalyzer(BaseAnalyzer):
             
             # CSV データ読み込み
             df = pd.read_csv(self.temp_csv_path)
+            
+            # データクリーニング：Infinity値を除去、NaNを空文字に変換
+            df = df.replace([float('inf'), float('-inf')], pd.NA)
+            df = df.dropna(how='all')  # 全列がNAの行のみ削除
+            df = df.fillna('')  # 残ったNAを空文字に戻す
+            
+            if df.empty:
+                raise ValueError("No valid data remaining after cleaning - all rows were completely empty")
+            
+            self.logger.info(f"Data cleaned: {len(df)} rows remaining after removing completely empty rows")
             
             # API リクエストデータ準備（toorpiaクライアントと同じ形式）
             columns = df.columns.tolist()
