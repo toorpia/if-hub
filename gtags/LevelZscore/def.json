@@ -1,8 +1,8 @@
 {
-  "name": "Tank01.LevelZscore",
+  "name": "LevelZscore",
   "type": "zscore",
-  "inputs": ["Tank01.Level"],
+  "inputs": ["Level"],
   "window": 24,
-  "description": "タンク01水位のZ-score（異常検知用）",
+  "description": "水位のZ-score（異常検知用）",
   "unit": ""
 }

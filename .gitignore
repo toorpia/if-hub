@@ -151,3 +151,6 @@ plugins/**/*.temp
 7th-untan-full.csv
 7th-untan.csv
 lfu.csv
+
+# other
+other_resources/*

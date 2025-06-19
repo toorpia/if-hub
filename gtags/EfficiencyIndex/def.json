@@ -1,8 +1,8 @@
 {
-  "name": "Pump01.EfficiencyIndex",
+  "name": "EfficiencyIndex",
   "type": "calculation",
-  "inputs": ["Pump01.Flow", "Pump01.PowerConsumption"],
+  "inputs": ["Flow", "PowerConsumption"],
   "expression": "(inputs[0] / inputs[1]) * 100",
-  "description": "ポンプ01の効率指標（Flow/PowerConsumption × 100）",
+  "description": "効率指標（Flow/PowerConsumption × 100）",
   "unit": "%"
 }

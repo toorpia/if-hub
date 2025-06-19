@@ -4,6 +4,37 @@ const router = express.Router();
 const { db } = require('../db');
 const { getTagMetadata, getTagsMetadata } = require('../utils/tag-utils');
 
+// ===== 設備関連API =====
+
+// 設備一覧取得
+router.get('/api/equipment', (req, res) => {
+  try {
+    // equipment_tagsテーブルから設備一覧を取得
+    const equipments = db.prepare(`
+      SELECT 
+        equipment_name as name,
+        COUNT(CASE WHEN tag_type = 'source' THEN 1 END) as source_tag_count,
+        COUNT(CASE WHEN tag_type = 'gtag' THEN 1 END) as gtag_count,
+        COUNT(*) as total_tag_count
+      FROM equipment_tags
+      GROUP BY equipment_name
+      ORDER BY equipment_name
+    `).all();
+    
+    res.json({ 
+      equipments: equipments.map(eq => ({
+        name: eq.name,
+        sourceTags: eq.source_tag_count,
+        gtags: eq.gtag_count,
+        totalTags: eq.total_tag_count
+      }))
+    });
+  } catch (error) {
+    console.error('設備一覧の取得中にエラーが発生しました:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ===== タグ関連API =====
 
 // ソースタグ名によるタグの検索
@@ -70,54 +101,90 @@ router.get('/api/tags', (req, res) => {
     const shouldShowUnit = showUnit === 'true';
     const shouldIncludeGtags = includeGtags === 'true';
     
-    // SQLクエリの構築
-    let query = 'SELECT * FROM tags';
-    const params = [];
-    
-    // 設備によるフィルタリング
+    // 設備フィルタリング用のパラメータ準備
+    let equipmentList = [];
     if (equipment) {
-      // カンマ区切りの値を配列に変換
-      const equipmentList = equipment.split(',');
-      if (equipmentList.length === 1) {
-        // 単一の設備
-        query += ' WHERE equipment = ?';
-        params.push(equipmentList[0]);
-      } else if (equipmentList.length > 1) {
-        // 複数の設備（IN句を使用）
-        query += ' WHERE equipment IN (' + equipmentList.map(() => '?').join(',') + ')';
-        params.push(...equipmentList);
-      }
+      equipmentList = equipment.split(',').map(eq => eq.trim());
     }
     
-    // 通常タグを取得
-    const tags = db.prepare(query).all(...params);
+    // 通常タグの取得（新しいequipment_tagsテーブルを使用）
+    let tagsQuery;
+    let tagsParams = [];
+    
+    if (equipmentList.length > 0) {
+      // 設備フィルタリング有り
+      tagsQuery = `
+        SELECT DISTINCT t.*, GROUP_CONCAT(et.equipment_name) as equipments_str
+        FROM tags t
+        JOIN equipment_tags et ON t.name = et.tag_name AND et.tag_type = 'source'
+        WHERE et.equipment_name IN (${equipmentList.map(() => '?').join(',')})
+        GROUP BY t.id, t.name, t.source_tag, t.unit, t.min, t.max
+      `;
+      tagsParams = equipmentList;
+    } else {
+      // 設備フィルタリング無し（全タグ）
+      tagsQuery = `
+        SELECT DISTINCT t.*, GROUP_CONCAT(et.equipment_name) as equipments_str
+        FROM tags t
+        LEFT JOIN equipment_tags et ON t.name = et.tag_name AND et.tag_type = 'source'
+        GROUP BY t.id, t.name, t.source_tag, t.unit, t.min, t.max
+      `;
+    }
+    
+    const tags = db.prepare(tagsQuery).all(...tagsParams);
+    
+    // タグに設備情報を追加
+    const tagsWithEquipments = tags.map(tag => {
+      const equipments = tag.equipments_str ? tag.equipments_str.split(',') : [];
+      return {
+        id: tag.id,
+        name: tag.name,
+        equipment: equipments[0] || '', // 後方互換性のため最初の設備名
+        equipments: equipments, // 新しいフィールド（配列）
+        source_tag: tag.source_tag,
+        unit: tag.unit,
+        min: tag.min,
+        max: tag.max
+      };
+    });
     
     // gtagも取得
-    let gtags = [];
+    let gtagsWithEquipments = [];
     if (shouldIncludeGtags) {
-      let gtagQuery = 'SELECT * FROM gtags';
-      const gtagParams = [];
+      let gtagQuery;
+      let gtagParams = [];
       
-      if (equipment) {
-        // 設備フィルタリングを適用
-        if (equipment.includes(',')) {
-          const equipmentList = equipment.split(',');
-          gtagQuery += ' WHERE equipment IN (' + equipmentList.map(() => '?').join(',') + ')';
-          gtagParams.push(...equipmentList);
-        } else {
-          gtagQuery += ' WHERE equipment = ?';
-          gtagParams.push(equipment);
-        }
+      if (equipmentList.length > 0) {
+        // 設備フィルタリング有り
+        gtagQuery = `
+          SELECT DISTINCT g.*, GROUP_CONCAT(et.equipment_name) as equipments_str
+          FROM gtags g
+          JOIN equipment_tags et ON g.name = et.tag_name AND et.tag_type = 'gtag'
+          WHERE et.equipment_name IN (${equipmentList.map(() => '?').join(',')})
+          GROUP BY g.id, g.name, g.description, g.unit, g.type, g.definition, g.created_at, g.updated_at
+        `;
+        gtagParams = equipmentList;
+      } else {
+        // 設備フィルタリング無し
+        gtagQuery = `
+          SELECT DISTINCT g.*, GROUP_CONCAT(et.equipment_name) as equipments_str
+          FROM gtags g
+          LEFT JOIN equipment_tags et ON g.name = et.tag_name AND et.tag_type = 'gtag'
+          GROUP BY g.id, g.name, g.description, g.unit, g.type, g.definition, g.created_at, g.updated_at
+        `;
       }
       
-      gtags = db.prepare(gtagQuery).all(...gtagParams);
+      const gtags = db.prepare(gtagQuery).all(...gtagParams);
       
       // gtagをタグ形式に変換
-      gtags = gtags.map(gtag => {
-        const definition = JSON.parse(gtag.definition);
+      gtagsWithEquipments = gtags.map(gtag => {
+        const equipments = gtag.equipments_str ? gtag.equipments_str.split(',') : [];
+        const definition = gtag.definition ? JSON.parse(gtag.definition) : {};
+        
         return {
           id: gtag.id,
-          equipment: gtag.equipment,
+          equipment: equipments[0] || '', // 後方互換性
+          equipments: equipments, // 新しいフィールド
           name: gtag.name,
           unit: gtag.unit || '',
           description: gtag.description || '',
@@ -128,11 +195,11 @@ router.get('/api/tags', (req, res) => {
     }
     
     // 通常タグとgtagを統合
-    const allTags = [...tags, ...gtags];
+    const allTags = [...tagsWithEquipments, ...gtagsWithEquipments];
     
     // 表示名処理
     if (shouldDisplay) {
-      const tagNames = tags.map(tag => tag.name);
+      const tagNames = tagsWithEquipments.map(tag => tag.name);
       const metadataMap = getTagsMetadata(tagNames, { 
         display: true, 
         lang, 
