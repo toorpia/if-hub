@@ -137,6 +137,77 @@ docker compose restart
 - `tools/monitor-system.sh` - システム監視
 - `tools/initial-data-import.sh` - 初期データ取り込み
 
+## プラグインシステムのオフライン環境配置
+
+IF-HUBのプラグインシステムをオフライン環境に配置する手順です。
+
+### プラグインシステム事前準備（開発環境）
+
+#### 仮想環境の構築
+
+```bash
+# プラグイン用仮想環境の作成
+./plugins/venv_management/setup_venv_analyzer.sh {プラグイン名}
+
+# 例: toorpia_backendプラグインの場合
+./plugins/venv_management/setup_venv_analyzer.sh toorpia_backend
+```
+
+#### パッケージ作成時の自動統合
+
+`create-package.sh` 実行時に以下が自動的に統合されます：
+
+- プラグインシステム実行環境（`plugins/run_plugin.py`等）
+- 仮想環境（`plugins/venvs/`）
+- 管理スクリプト（`plugins/venv_management/`）
+
+### オフライン環境での配置確認
+
+#### プラグインシステムの初期化確認
+
+```bash
+# プラグインシステムのディレクトリ構造確認
+ls -la plugins/
+ls -la plugins/venvs/analyzers/
+
+# 仮想環境の動作確認
+plugins/venvs/analyzers/{プラグイン名}/bin/python --version
+```
+
+#### プラグイン実行テスト
+
+```bash
+# プラグイン一覧表示
+python3 plugins/run_plugin.py list
+
+# プラグイン実行テスト（例：status確認）
+python3 plugins/run_plugin.py --type analyzer --name {プラグイン名} \
+  --config configs/equipments/{設備名}/config.yaml --mode status
+```
+
+### プラグインシステムのトラブルシューティング
+
+#### 仮想環境エラー
+
+```bash
+# エラー: 仮想環境が見つからない
+# 解決方法: ディレクトリ構造確認
+ls -la plugins/venvs/analyzers/
+chmod +x plugins/venvs/analyzers/*/bin/python
+```
+
+#### プラグイン実行エラー
+
+```bash
+# エラー: プラグインメタデータ読み込み失敗
+# 解決方法: メタデータファイル確認
+cat plugins/analyzers/{プラグイン名}/plugin_meta.yaml
+
+# エラー: プラグイン実行タイムアウト
+# 解決方法: ログ確認
+cat plugins/logs/{プラグイン名}.log
+```
+
 ## 完了確認
 
 以下が確認できれば移行完了です：
@@ -144,6 +215,7 @@ docker compose restart
 1. **コンテナ起動**: `docker ps | grep if-hub` で2つのコンテナが Up
 2. **WebUI表示**: ブラウザで http://localhost:3001 にアクセス可能  
 3. **データ取得**: `static_equipment_data/` にCSVファイル生成
+4. **プラグインシステム**: `python3 plugins/run_plugin.py list` でプラグイン一覧が表示される
 
 ---
 
