@@ -6,6 +6,7 @@ class EquipmentConfigManager {
   constructor() {
     this.configsPath = path.join(__dirname, '../../configs/equipments');
     this.equipmentConfigs = new Map();
+    this.fileMtimes = new Map(); // ファイル変更時刻を追跡
     this.lastLoadTime = null;
     this.loadConfigs();
   }
@@ -33,6 +34,10 @@ class EquipmentConfigManager {
           try {
             const configContent = fs.readFileSync(configPath, 'utf8');
             const config = yaml.load(configContent);
+            
+            // ファイルの変更時刻を記録
+            const stats = fs.statSync(configPath);
+            this.fileMtimes.set(configPath, stats.mtime.getTime());
             
             // 設備名をキーとして設定を保存
             this.equipmentConfigs.set(equipmentName, {
@@ -177,11 +182,119 @@ class EquipmentConfigManager {
   }
 
   /**
+   * 指定された設備の設定ファイルのみをリロード
+   * @param {string} configPath - 設定ファイルのパス
+   * @returns {boolean} リロード成功可否
+   */
+  loadSingleEquipmentConfig(configPath) {
+    try {
+      // パスから設備名を抽出
+      const equipmentName = path.basename(path.dirname(configPath));
+      
+      if (!fs.existsSync(configPath)) {
+        console.warn(`Config file not found: ${configPath}`);
+        return false;
+      }
+
+      // ファイルを読み込み
+      const configContent = fs.readFileSync(configPath, 'utf8');
+      const config = yaml.load(configContent);
+      
+      // ファイルの変更時刻を記録
+      const stats = fs.statSync(configPath);
+      this.fileMtimes.set(configPath, stats.mtime.getTime());
+      
+      // 設備名をキーとして設定を保存
+      this.equipmentConfigs.set(equipmentName, {
+        ...config,
+        equipmentName,
+        configPath
+      });
+      
+      console.log(`Reloaded config for equipment: ${equipmentName}`);
+      return true;
+    } catch (error) {
+      console.error(`Error reloading config ${configPath}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * 変更されたファイルのみを効率的にリロード
+   * @param {Array} changedFiles - 変更されたファイルパスの配列
+   */
+  reloadChangedConfigs(changedFiles) {
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const configPath of changedFiles) {
+      if (this.loadSingleEquipmentConfig(configPath)) {
+        successCount++;
+      } else {
+        failureCount++;
+      }
+    }
+
+    console.log(`Successfully reloaded ${successCount} equipment configuration(s)`);
+    if (failureCount > 0) {
+      console.warn(`Failed to reload ${failureCount} equipment configuration(s)`);
+    }
+  }
+
+  /**
    * 設定ファイルをリロード（開発・デバッグ用）
    */
   reloadConfigs() {
     console.log('Reloading equipment configurations...');
     this.loadConfigs();
+  }
+
+  /**
+   * 設定ファイルの変更をチェックし、必要に応じて自動リロード
+   * APIリクエスト時に呼び出される
+   */
+  checkAndReloadIfNeeded() {
+    try {
+      if (!fs.existsSync(this.configsPath)) {
+        return;
+      }
+
+      let shouldReload = false;
+      const changedFiles = [];
+
+      // 各設備ディレクトリをチェック
+      const equipmentDirs = fs.readdirSync(this.configsPath, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name);
+
+      for (const equipmentName of equipmentDirs) {
+        const configPath = path.join(this.configsPath, equipmentName, 'config.yaml');
+        
+        if (fs.existsSync(configPath)) {
+          try {
+            const stats = fs.statSync(configPath);
+            const currentMtime = stats.mtime.getTime();
+            const lastMtime = this.fileMtimes.get(configPath) || 0;
+            
+            if (currentMtime > lastMtime) {
+              shouldReload = true;
+              changedFiles.push(configPath);
+            }
+          } catch (error) {
+            console.error(`Error checking mtime for ${configPath}:`, error.message);
+          }
+        }
+      }
+
+      // 変更があった場合のみリロード
+      if (shouldReload) {
+        console.log(`Config files changed, selective reloading: ${changedFiles.join(', ')}`);
+        this.reloadChangedConfigs(changedFiles);
+      }
+    } catch (error) {
+      console.error('Error in checkAndReloadIfNeeded:', error.message);
+      // エラーが発生しても既存の設定を保持して処理を続行
+    }
   }
 
   /**

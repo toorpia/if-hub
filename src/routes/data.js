@@ -509,6 +509,9 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
   } = req.query;
   
   try {
+    // 設定ファイルの変更チェック・自動リロード
+    equipmentConfigManager.checkAndReloadIfNeeded();
+    
     // 設備の存在チェック（config.yamlベース）
     const equipmentNames = equipmentConfigManager.getAllEquipments();
     if (!equipmentNames.includes(equipmentId)) {
