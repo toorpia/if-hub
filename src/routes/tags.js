@@ -14,6 +14,9 @@ router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
   const { equipment, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   try {
+    // 設定ファイルの変更チェック・自動リロード
+    equipmentConfigManager.checkAndReloadIfNeeded();
+    
     // 全タグを取得
     const allTags = db.prepare('SELECT * FROM tags WHERE source_tag = ?').all(sourceTag);
     
@@ -91,6 +94,9 @@ router.get('/api/tags', (req, res) => {
   const { display = 'false', lang = 'ja', showUnit = 'false', equipment, includeGtags = 'true' } = req.query;
   
   try {
+    // 設定ファイルの変更チェック・自動リロード
+    equipmentConfigManager.checkAndReloadIfNeeded();
+    
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
     const shouldIncludeGtags = includeGtags === 'true';
@@ -209,6 +215,9 @@ router.get('/api/tags', (req, res) => {
 // gtag一覧取得
 router.get('/api/gtags', (req, res) => {
   try {
+    // 設定ファイルの変更チェック・自動リロード
+    equipmentConfigManager.checkAndReloadIfNeeded();
+    
     const gtags = db.prepare('SELECT * FROM gtags').all();
     
     const formattedGtags = gtags.map(gtag => {

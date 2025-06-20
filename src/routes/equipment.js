@@ -11,6 +11,9 @@ router.get('/api/equipment', (req, res) => {
   const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false', includeGtags = 'true' } = req.query;
   
   try {
+    // 設定ファイルの変更チェック・自動リロード
+    equipmentConfigManager.checkAndReloadIfNeeded();
+    
     // config.yamlから設備情報を取得
     const equipmentNames = equipmentConfigManager.getAllEquipments();
     const equipment = equipmentNames.map(name => {
