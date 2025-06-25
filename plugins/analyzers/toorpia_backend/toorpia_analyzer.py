@@ -228,8 +228,13 @@ class ToorPIAAnalyzer(BaseAnalyzer):
     
     def _determine_processing_mode(self) -> str:
         """処理モード判定"""
-        # コンストラクタで指定されたモードを使用、未指定の場合はaddplot_update
-        return self.processing_mode or 'addplot_update'
+        if not self.processing_mode:
+            raise ProcessingModeError(
+                "Processing mode must be specified",
+                specified_mode=None,
+                supported_modes=["basemap_update", "addplot_update"]
+            )
+        return self.processing_mode
     
     def _fetch_equipment_data(self) -> bool:
         """IF-HUB APIを直接使用した設備データ取得"""
@@ -256,9 +261,9 @@ class ToorPIAAnalyzer(BaseAnalyzer):
                 start_time = self._parse_interval_to_start_time(lookback_period, end_time)
                 self.logger.info(f"Using addplot data period: {lookback_period} lookback from current time")
             
-            # ISO形式に変換
-            start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            end_iso = end_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            # ISO形式に変換（ローカル時刻）
+            start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000")
+            end_iso = end_time.strftime("%Y-%m-%dT%H:%M:%S.000")
             
             self.logger.info(f"Fetching data from {start_iso} to {end_iso}")
             

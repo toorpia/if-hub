@@ -85,7 +85,7 @@ def main():
     parser = argparse.ArgumentParser(description='toorPIA Backend Analyzer')
     parser.add_argument('config_path', help='設備設定ファイルパス')
     parser.add_argument('--mode', choices=['basemap_update', 'addplot_update'], 
-                       default='addplot_update', help='処理モード')
+                       required=True, help='処理モード（必須）: basemap_update（基盤マップ更新）またはaddplot_update（追加プロット・異常検知）')
     parser.add_argument('--validate-only', action='store_true', 
                        help='設定ファイルバリデーションのみ実行')
     parser.add_argument('--status', action='store_true', 

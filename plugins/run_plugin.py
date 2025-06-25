@@ -383,20 +383,32 @@ def main():
         sys.exit(0)
     
     elif args.command == 'validate':
-        # 設定バリデーション
-        try:
-            # プラグイン読み込み
-            module_path = f"plugins.{PLUGIN_TYPES[args.type]}.{args.name}.run"
-            module = importlib.import_module(module_path)
-            
-            if hasattr(module, 'validate_config'):
-                is_valid = module.validate_config(args.config)
-                print(f"Config validation: {'PASSED' if is_valid else 'FAILED'}")
-                sys.exit(0 if is_valid else 1)
-            else:
-                print("Plugin does not support config validation")
-                sys.exit(1)
+        # 仮想環境でバリデーション実行
+        import subprocess
         
+        python_exe = get_python_executable(args.type, args.name)
+        plugin_run_script = os.path.join("plugins", PLUGIN_TYPES[args.type], args.name, "run.py")
+        
+        if not os.path.isfile(plugin_run_script):
+            print(f"Plugin run script not found: {plugin_run_script}")
+            sys.exit(1)
+        
+        cmd = [python_exe, plugin_run_script, args.config, "--validate-only"]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            # 標準出力をそのまま表示
+            if result.stdout:
+                print(result.stdout.strip())
+            if result.stderr:
+                print(result.stderr.strip(), file=sys.stderr)
+            
+            sys.exit(result.returncode)
+        
+        except subprocess.TimeoutExpired:
+            print("Validation timed out (60s)")
+            sys.exit(1)
         except Exception as e:
             print(f"Validation failed: {e}")
             sys.exit(1)
