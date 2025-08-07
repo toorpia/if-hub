@@ -2,25 +2,27 @@
 
 ## License Overview
 
-This software is provided under the **Business-Friendly License (BFL)**, which is based on the principles of the Business Source License (BSL). 
+This software is provided under the **Business-Friendly License (BFL)**, which ensures transparency through open source code publication while maintaining appropriate commercial usage controls.
 
 - **Effective Date:** [2025-03-20]  
-- **Change Date:** 3 years after the release date [2028-03-20]
-- **Change License:** Apache License 2.0  
+- **License Type:** Permanent Business-Friendly License (BFL)
+- **Open Source Publication:** Source code is openly published on GitHub for transparency and community contribution
 
 ## Usage Terms
 
-1. **Free for Non-Commercial Use**  
-   - You may use, modify, and distribute this software for non-commercial purposes, such as research, education, and personal projects.  
+1. **Free for Non-Commercial and Verification Use**  
+   - You may use, modify, and distribute this software for non-commercial purposes, including research, education, personal projects, proof of concept (PoC), and internal verification purposes.
 
 2. **Commercial Use Restrictions**  
-   - For commercial usage (including deployment in a business environment), you must obtain a commercial license from toor Inc.  
+   - For commercial production usage (including deployment in a business environment for revenue-generating purposes), you must obtain a commercial license from toor Inc.
 
 3. **Modification and Distribution**  
-   - Any modification of this software must retain this license until the Change Date.  
+   - Any modification of this software must retain this license.
+   - Contributions to the project are welcomed under the same BFL terms.
 
-4. **Change Date and License Transition**  
-   - On the Change Date, this software will transition to the Apache License 2.0, making it fully open-source and free for commercial use.  
+4. **Permanent License**  
+   - This software will continue to be provided under the Business-Friendly License (BFL).
+   - Source code remains openly available on GitHub to ensure transparency and enable community contributions.
 
 ## Disclaimer
 
