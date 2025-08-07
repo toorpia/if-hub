@@ -156,3 +156,8 @@ lfu.csv
 
 # other
 other_resources/*
+
+# 7th-untan equipment configuration (private)
+configs/equipments/7th-untan/
+test/configs/equipments/7th-untan/
+test/output/7th-untan.csv
