@@ -19,6 +19,16 @@ console.log(`データベースファイル: ${DB_PATH}`);
 // データベース接続の初期化
 const db = sqlite3(DB_PATH);
 
+// SQLite最適化設定
+db.pragma('journal_mode = WAL');
+db.pragma('cache_size = -64000');
+db.pragma('mmap_size = 268435456');
+
+console.log('SQLite最適化設定を適用しました:');
+console.log(`  - journal_mode: ${db.pragma('journal_mode', { simple: true })}`);
+console.log(`  - cache_size: ${db.pragma('cache_size', { simple: true })} pages`);
+console.log(`  - mmap_size: ${db.pragma('mmap_size', { simple: true })} bytes`);
+
 // テーブルの作成
 function initDatabase() {
   // タグメタデータテーブル（equipment列を削除）
