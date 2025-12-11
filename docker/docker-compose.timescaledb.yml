@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # TimescaleDB Database Service
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: if-hub-timescaledb
+    environment:
+      POSTGRES_DB: if_hub
+      POSTGRES_USER: if_hub_user
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-change_this_password}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb"
+    ports:
+      - "${TIMESCALE_PORT:-5432}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./init-scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - if-hub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U if_hub_user -d if_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    shm_size: 256mb
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_worker_processes=4"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=4"
+      - "-c"
+      - "max_parallel_maintenance_workers=2"
+
+  # IF-HUB Application Service (TimescaleDB version)
+  if-hub:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: if-hub-timescaledb-app
+    ports:
+      - "${EXTERNAL_PORT:-3001}:3000"
+    volumes:
+      - ../src:/app/src
+      - ../configs:/app/configs:ro
+      - ../static_equipment_data:/app/static_equipment_data
+      - ../tag_metadata:/app/tag_metadata
+      - ../gtags:/app/gtags
+      - ../logs:/app/logs
+      - ../package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - EXTERNAL_PORT=${EXTERNAL_PORT:-3001}
+      - TZ=${TZ:-Asia/Tokyo}
+      # TimescaleDB connection settings
+      - TIMESCALE_HOST=timescaledb
+      - TIMESCALE_PORT=5432
+      - TIMESCALE_DB=if_hub
+      - TIMESCALE_USER=if_hub_user
+      - TIMESCALE_PASSWORD=${TIMESCALE_PASSWORD:-change_this_password}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - if-hub-network
+    restart: unless-stopped
+
+  # PI Ingester Service (optional - if needed)
+  pi-ingester:
+    build:
+      context: ../ingester
+      dockerfile: Dockerfile
+    container_name: if-hub-pi-ingester-timescaledb
+    volumes:
+      - ../configs:/app/configs:ro
+      - ../logs:/app/logs
+      - ../static_equipment_data:/app/static_equipment_data
+      - ../tag_metadata:/app/tag_metadata
+    environment:
+      - TZ=${TZ:-Asia/Tokyo}
+      - NODE_ENV=production
+    restart: unless-stopped
+    depends_on:
+      - if-hub
+    networks:
+      - if-hub-network
+
+volumes:
+  timescale_data:
+    driver: local
+
+networks:
+  if-hub-network:
+    driver: bridge
