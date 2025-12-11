@@ -770,32 +770,12 @@ async function executeProcess(target, type, params = {}, options = {}) {
 
 /**
  * gtag初期化（テーブル作成とインデックス設定）
+ * Note: gtagsテーブルはTimescaleDB init-timescaledb.sqlで既に作成済み
  */
 function initializeGtagSystem() {
   try {
-    // gtagsテーブルの作成
-    db.prepare(`
-      CREATE TABLE IF NOT EXISTS gtags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        equipment TEXT NOT NULL,
-        description TEXT,
-        unit TEXT,
-        type TEXT NOT NULL,
-        definition TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `).run();
-    
-    // インデックス作成
-    db.prepare(`
-      CREATE INDEX IF NOT EXISTS idx_gtags_equipment ON gtags(equipment)
-    `).run();
-    db.prepare(`
-      CREATE INDEX IF NOT EXISTS idx_gtags_name ON gtags(name)
-    `).run();
-    
+    // TimescaleDBではテーブルとインデックスは init-timescaledb.sql で作成済み
+    // ここでは何もしない（互換性のために関数のみ残す）
     console.log('gtagシステムの初期化が完了しました');
   } catch (error) {
     console.error('gtagシステム初期化中にエラーが発生しました:', error);
