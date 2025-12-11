@@ -136,11 +136,41 @@ IndustryFlow Hubは現在、主に`static_equipment_data`フォルダに設置�
 ## 🔧 開発環境でのクイックスタート
 
 ### 前提条件
+
+**Docker環境（推奨）：**
+- Docker & Docker Compose
+
+**ネイティブ環境：**
 - Node.js 18以上
 - npm または yarn
-- （オプション）Docker & Docker Compose
+- PostgreSQL 14以上 + TimescaleDB extension
 
 ### インストールと起動
+
+#### Docker環境での起動（推奨）
+
+Docker環境では、TimescaleDB/PostgreSQLのインストールは不要です。すべてコンテナとして動作します。
+
+```bash
+# リポジトリのクローン
+git clone https://github.com/toorpia/if-hub.git
+cd if-hub
+
+# 環境変数の設定（オプション）
+cp docker/.env.example docker/.env
+# 必要に応じて .env ファイルを編集
+
+# Docker Composeで起動（TimescaleDB + IF-Hub）
+cd docker
+docker compose -f docker-compose.timescaledb.yml up -d
+
+# ログの確認
+docker compose -f docker-compose.timescaledb.yml logs -f
+```
+
+#### ネイティブ環境での起動
+
+ネイティブ環境では、PostgreSQL + TimescaleDBを事前にインストールする必要があります。
 
 ```bash
 # リポジトリのクローン
@@ -150,18 +180,24 @@ cd if-hub
 # 依存関係のインストール
 npm install
 
-# 開発環境での起動（start-if-hub.shを使用）
-./start-if-hub.sh
+# TimescaleDBの準備（事前にPostgreSQLとTimescaleDBがインストール済みであること）
+# データベースとユーザーを作成
+psql -U postgres -c "CREATE DATABASE if_hub;"
+psql -U postgres -c "CREATE USER if_hub_user WITH PASSWORD 'your_password';"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE if_hub TO if_hub_user;"
 
-# または本番環境での起動
-./start-if-hub.sh prod
+# スキーマ初期化
+psql -U if_hub_user -d if_hub -f docker/init-timescaledb.sql
 
-# 直接起動（npm）
+# 環境変数の設定
+export TIMESCALE_HOST=localhost
+export TIMESCALE_PORT=5432
+export TIMESCALE_DB=if_hub
+export TIMESCALE_USER=if_hub_user
+export TIMESCALE_PASSWORD=your_password
+
+# アプリケーションの起動
 npm start
-
-# Docker環境での起動
-cd docker
-docker-compose up -d
 ```
 
 ### 基本的な動作確認
@@ -217,7 +253,11 @@ tar -xzf if-hub-*.tgz && cd if-hub
 IF-HUBは以下の技術コンポーネントで構成されています：
 
 - **バックエンド**: Node.js + Express.js
-- **データストレージ**: ローカルデータベース（デフォルト）、一時キャッシュとして機能、他DBへの拡張可能
+- **データストレージ**: TimescaleDB (PostgreSQL extension)
+  - ハイパーテーブルによる効率的な時系列データ管理
+  - 自動データ圧縮（90%以上のストレージ削減）
+  - 時間バケット機能による高速集計
+  - 継続的集計（Continuous Aggregates）対応
 - **データインポート**: CSVパーサー + ファイル監視、API経由batchwiseデータ取得
 - **APIレイヤー**: RESTful API（JSON形式）、統一されたエンドポイント設計
 - **拡張エンジン**: 外部プロセッサ対応
@@ -226,7 +266,7 @@ IF-HUBは以下の技術コンポーネントで構成されています：
   - **C/C++**: レガシーコードの統合、極めて高速な処理
   - **その他**: カスタム言語プロセッサの追加も可能
 
-これらのコンポーネントは疎結合な設計となっており、必要に応じて個別に拡張・置換することができます。たとえば、SQLiteをTimescaleDBに置き換えたり、新しい種類の外部プロセッサを追加したり、データの取得方法をカスタマイズすることが可能です。
+これらのコンポーネントは疎結合な設計となっており、必要に応じて個別に拡張・置換することができます。TimescaleDBは産業用時系列データの管理に最適化されており、大規模なデータセットでも高いパフォーマンスを維持します。
 
 ## ファイル構成
 
@@ -239,10 +279,11 @@ IF-HUBは以下の主要ディレクトリで構成されています：
 ├── ingester/                # PI Systemデータ取り込み機構
 ├── gtags/                   # 仮想タグ定義と計算スクリプト
 ├── docker/                  # Docker関連設定ファイル
+│   ├── docker-compose.timescaledb.yml  # TimescaleDB環境
+│   └── init-timescaledb.sql            # DB初期化スクリプト
 ├── docs/                    # プロジェクトドキュメント
 ├── static_equipment_data/   # 設備データCSV格納ディレクトリ
 ├── tag_metadata/            # タグメタデータ格納ディレクトリ
-├── db/                      # データベースファイル
 └── logs/                    # ログファイル
 ```
 
@@ -251,7 +292,7 @@ IF-HUBは以下の主要ディレクトリで構成されています：
 - **`static_equipment_data/`**: 設備データCSVファイルを配置（自動検出・インポート）
 - **`gtags/`**: 仮想タグ（計算タグ）の定義を格納
 - **`tag_metadata/`**: タグの表示名や単位情報を格納
-- **`docker/`**: 開発環境・本番環境用のDocker設定
+- **`docker/`**: Docker環境用設定（TimescaleDB + IF-Hub）
 
 詳細なファイル構成については、[開発者ガイド](docs/ja/developer_guide.md)をご参照ください。
 
@@ -262,33 +303,36 @@ IF-HUBは以下の主要ディレクトリで構成されています：
 - [開発者ガイド](docs/ja/developer_guide.md) - アーキテクチャ、コード詳細、拡張方法
 - [プラグインシステムガイド](docs/ja/plugin.md) - プラグイン開発・運用の詳細
 - [高次元時系列データのリサンプリング原則](docs/ja/timeseries_resampling_principles.md) - 時系列データの前処理と解析における理論的基礎
+- [TimescaleDB移行設計](docs/timescaledb-migration-design.md) - データベースアーキテクチャの詳細
 
-## データベースの選択と拡張性
+## TimescaleDBの特徴と利点
 
-IF-HUBは現在SQLiteをデータストレージとして使用しています。これは小〜中規模の導入に適していますが、より大規模なデプロイメントでは、以下のエンタープライズグレードのデータベースへの移行も検討できます：
+IF-HUBが採用しているTimescaleDBは、PostgreSQLの拡張として時系列データに特化した機能を提供します：
 
-1. **TimescaleDB** - PostgreSQLの拡張として、高度な時系列機能を提供
-   - **長所**: PostgreSQLの拡張であるため、SQLの知識がそのまま活用できる。標準SQLのみならず時系列特有の機能も充実。
-   - **適用例**: 既存のSQLスキルを活用しつつ、時系列データの拡張性を求めるケース
+### 主な特徴
+- **ハイパーテーブル**: 時系列データを自動的に最適なチャンクに分割し、クエリパフォーマンスを向上
+- **自動圧縮**: 古いデータを自動的に圧縮し、ストレージ使用量を90%以上削減
+- **時間バケット機能**: `time_bucket()`関数による高速なダウンサンプリング・集計
+- **継続的集計**: リアルタイムで更新されるマテリアライズドビュー
+- **PostgreSQL互換**: 既存のPostgreSQLツールやエコシステムをそのまま活用可能
 
-2. **InfluxDB** - 時系列データに特化した高性能データベース
-   - **長所**: IoTや監視向けに特化した時系列データベース。高い書き込みパフォーマンスと効率的なストレージ。
-   - **適用例**: 大量のセンサーデータを高速に取り込む必要があるケース
+### 適用例
+- **大量の時系列データ**: 数百万〜数億レコードの効率的な管理
+- **高速なクエリ**: 時間範囲指定による高速なデータ取得
+- **長期データ保存**: 自動圧縮による効率的なストレージ利用
+- **リアルタイム分析**: 継続的集計による即座のデータ可視化
 
-3. **QuestDB** - SQLインターフェースを持つ高速な時系列データベース
-   - **長所**: 極めて高速なクエリ実行と低いリソース消費。SQLサポートにより学習曲線が緩やか。
-   - **適用例**: リアルタイム分析や高速クエリが重要なケース
-
-今後のリリースで、これらのデータベースへのプラグイン方式でのサポートを追加する予定です。
+詳細なパフォーマンス特性とチューニングについては、[TimescaleDB移行設計書](docs/timescaledb-migration-design.md)をご参照ください。
 
 ## 将来の展望
 
 IF-HUBは継続的に進化するプロジェクトであり、以下の機能拡張を計画しています：
 
 - **API連携の拡充** - より多様な産業用データシステムとのAPIベース連携機能（OPC UA、MQTT、PI Web API等）
-- **キャッシュ最適化** - 一時キャッシュのパフォーマンス最適化とデータ保持ポリシーの柔軟な設定
+- **キャッシュ最適化** - TimescaleDBの継続的集計を活用した更なるパフォーマンス向上
 - **リアルタイム処理** - streambased処理オプションの追加によるリアルタイムデータ変換
 - **インタラクティブな可視化** - 簡易なデータ探索・分析ダッシュボード
+- **高度な時系列機能** - TimescaleDBの機能を活用した補間、ギャップ埋め、時間加重平均などの実装
 
 これらの機能は、ユーザーニーズとコミュニティフィードバックに基づいて優先順位を決定し、段階的に実装していく予定です。
 
