@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
-const { db } = require('../db');
+const { pool, prepare } = require('../db');
 const config = require('../config');
 
 // タグメタデータファイルパス
@@ -23,9 +23,9 @@ function initMetadataCache() {
  * @param {number} tagId タグID（整数型）
  * @param {string} sourceTag ソースタグ
  * @param {string} language 言語コード
- * @returns {boolean} メタデータが適用されたかどうか
+ * @returns {Promise<boolean>} メタデータが適用されたかどうか
  */
-function applyMetadataToTag(tagId, sourceTag, language = 'ja') {
+async function applyMetadataToTag(tagId, sourceTag, language = 'ja') {
   if (!sourceTag || !metadataCache[sourceTag] || !metadataCache[sourceTag][language]) {
     return false;
   }
@@ -33,14 +33,17 @@ function applyMetadataToTag(tagId, sourceTag, language = 'ja') {
   try {
     const metadata = metadataCache[sourceTag][language];
     console.log(`タグID ${tagId} にキャッシュされたメタデータを適用します: ${JSON.stringify(metadata)}`);
-    
-    // tag_idは整数型になっていることに注意
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO tag_translations (tag_id, language, display_name, unit)
-      VALUES (?, ?, ?, ?)
-    `);
-    
-    stmt.run(tagId, language, metadata.displayName, metadata.unit || '');
+
+    // PostgreSQL UPSERT (INSERT ... ON CONFLICT)
+    await pool.query(`
+      INSERT INTO tag_translations (tag_id, language, display_name, unit)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (tag_id, language)
+      DO UPDATE SET
+        display_name = EXCLUDED.display_name,
+        unit = EXCLUDED.unit
+    `, [tagId, language, metadata.displayName, metadata.unit || '']);
+
     return true;
   } catch (error) {
     console.error(`メタデータ適用中にエラーが発生しました: ${error.message}`);
@@ -62,26 +65,26 @@ async function loadAndCacheMetadata() {
     // CSVファイル一覧を取得
     const files = fs.readdirSync(TRANSLATIONS_PATH)
       .filter(file => file.endsWith('.csv') && file.includes('translations'));
-    
+
     if (files.length === 0) {
       console.log(`タグメタデータファイルが見つかりません`);
       return;
     }
 
     console.log(`${files.length}個のタグメタデータファイルを見つけました`);
-    
+
     // メタデータキャッシュをクリア
     initMetadataCache();
-    
+
     // 各ファイルを処理
     for (const file of files) {
       const filePath = path.join(TRANSLATIONS_PATH, file);
       console.log(`ファイル ${file} を処理中...`);
-      
+
       // 言語コードをファイル名から抽出（例: translations_ja.csv → ja）
       const langMatch = file.match(/translations_([a-z]{2}(?:[-_][A-Z]{2})?)\.csv/);
       const language = langMatch ? langMatch[1] : 'default';
-      
+
       // CSVを読み込む
       const rows = [];
       await new Promise((resolve, reject) => {
@@ -94,19 +97,19 @@ async function loadAndCacheMetadata() {
           })
           .on('error', reject);
       });
-      
+
       // メタデータをキャッシュに追加
       let cacheCount = 0;
       for (const row of rows) {
         const sourceTag = row.source_tag || row.sourceTag;
         const displayName = row.display_name || row.displayName;
         const unit = row.unit || '';
-        
+
         if (sourceTag && displayName) {
           if (!metadataCache[sourceTag]) {
             metadataCache[sourceTag] = {};
           }
-          
+
           metadataCache[sourceTag][language] = {
             displayName,
             unit
@@ -114,20 +117,20 @@ async function loadAndCacheMetadata() {
           cacheCount++;
         }
       }
-      
+
       console.log(`  ${cacheCount} 件のメタデータをキャッシュしました（言語: ${language}）`);
-      
+
       // キャッシュの一部をデバッグ表示
       const cacheKeys = Object.keys(metadataCache);
       if (cacheKeys.length > 0) {
         console.log(`  キャッシュサンプル: ${cacheKeys[0]} => ${JSON.stringify(metadataCache[cacheKeys[0]])}`);
       }
     }
-    
+
     console.log('タグメタデータのキャッシュが完了しました');
-    
+
     // 既存タグに対してメタデータを適用
-    applyMetadataToExistingTags();
+    await applyMetadataToExistingTags();
   } catch (error) {
     console.error('タグメタデータの読み込み中にエラーが発生しました:', error);
   }
@@ -136,20 +139,21 @@ async function loadAndCacheMetadata() {
 /**
  * 既存タグに対してメタデータを適用
  */
-function applyMetadataToExistingTags() {
+async function applyMetadataToExistingTags() {
   try {
     // 既存のタグを取得
-    const tags = db.prepare('SELECT id, source_tag FROM tags').all();
+    const result = await pool.query('SELECT id, source_tag FROM tags');
+    const tags = result.rows;
     let appliedCount = 0;
-    
+
     console.log(`${tags.length} 件の既存タグにメタデータを適用します...`);
-    
+
     for (const tag of tags) {
-      if (applyMetadataToTag(tag.id, tag.source_tag)) {
+      if (await applyMetadataToTag(tag.id, tag.source_tag)) {
         appliedCount++;
       }
     }
-    
+
     console.log(`${appliedCount} 件のタグにメタデータを適用しました`);
   } catch (error) {
     console.error('既存タグへのメタデータ適用中にエラーが発生しました:', error);
@@ -172,9 +176,9 @@ function getMetadataCache() {
   return metadataCache;
 }
 
-module.exports = { 
-  importTagMetadata, 
-  loadAndCacheMetadata, 
+module.exports = {
+  importTagMetadata,
+  loadAndCacheMetadata,
   applyMetadataToTag,
   getMetadataCache
 };
