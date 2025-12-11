@@ -5,12 +5,21 @@ const path = require('path');
 module.exports = {
   // 環境設定
   environment: process.env.NODE_ENV || 'development',
-  
+
   // サーバー設定
   server: {
     port: process.env.PORT || 3000,
     externalPort: process.env.EXTERNAL_PORT || 3001,  // 追加：外部ポート
     corsOrigins: process.env.ALLOWED_ORIGINS || '*'
+  },
+
+  // データベース設定 (TimescaleDB/PostgreSQL)
+  database: {
+    host: process.env.TIMESCALE_HOST || 'localhost',
+    port: parseInt(process.env.TIMESCALE_PORT || '5432', 10),
+    database: process.env.TIMESCALE_DB || 'if_hub',
+    user: process.env.TIMESCALE_USER || 'if_hub_user',
+    password: process.env.TIMESCALE_PASSWORD || ''
   },
   
   // API設定
