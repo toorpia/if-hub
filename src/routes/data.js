@@ -240,7 +240,7 @@ router.get('/api/batch', async (req, res) => {
     const result = {};
     
     // 一括でメタデータを取得（通常タグ用）
-    const metadataMap = getTagsMetadata(tagNames, {
+    const metadataMap = await getTagsMetadata(tagNames, {
       display: shouldDisplay,
       lang,
       showUnit: shouldShowUnit
@@ -435,7 +435,7 @@ router.get('/api/current', async (req, res) => {
     const result = {};
     
     // 一括でメタデータを取得（表示名オプション付き）
-    const metadataMap = getTagsMetadata(tagNames, {
+    const metadataMap = await getTagsMetadata(tagNames, {
       display: display === 'true',
       lang,
       showUnit: showUnit === 'true'
