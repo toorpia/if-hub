@@ -1,7 +1,7 @@
 // src/routes/gtags.js
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { get } = require('../db');
 const { getTagMetadata } = require('../utils/tag-utils');
 const { getGtagData, executeProcess } = require('../utils/gtag-utils');
 const { getTimeShiftedData } = require('../utils/time-utils');
@@ -12,19 +12,19 @@ const config = require('../config');
  */
 router.get('/api/gtags/:name', async (req, res) => {
   const { name } = req.params;
-  const { 
-    start, 
-    end, 
+  const {
+    start,
+    end,
     timeshift = 'false',
     display = 'false',
     lang = 'ja',
     showUnit = 'false',
     params = '{}'
   } = req.query;
-  
+
   try {
     // gtagの存在確認
-    const gtag = db.prepare('SELECT * FROM gtags WHERE name = ?').get(name);
+    const gtag = await get('SELECT * FROM gtags WHERE name = $1', [name]);
     
     if (!gtag) {
       return res.status(404).json({ error: `gtag ${name} not found` });
@@ -118,7 +118,7 @@ router.get('/api/process/:target', async (req, res) => {
     }
     
     // メタデータの取得（表示名オプション付き）
-    const metadata = getTagMetadata(target, {
+    const metadata = await getTagMetadata(target, {
       display: display === 'true',
       lang,
       showUnit: showUnit === 'true'

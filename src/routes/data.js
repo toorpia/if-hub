@@ -1,14 +1,14 @@
 // src/routes/data.js
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { query, get } = require('../db');
 const { getTagMetadata, getTagsMetadata } = require('../utils/tag-utils');
-const { getGtagData, executeProcess } = require('../utils/gtag-utils');
+const { getGtagData } = require('../utils/gtag-utils');
 const { getTimeShiftedData } = require('../utils/time-utils');
 const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('../utils/data-processing');
 const config = require('../config');
 const equipmentConfigManager = require('../services/equipment-config-manager');
-const { sortTagsByConfigOrder, sortTagIdsByConfigOrder } = require('../utils/config-order-sort');
+const { sortTagIdsByConfigOrder } = require('../utils/config-order-sort');
 
 // 特定タグのデータ取得
 router.get('/api/data/:tagName', async (req, res) => {
@@ -27,8 +27,10 @@ router.get('/api/data/:tagName', async (req, res) => {
   
   try {
     // タグが通常タグかgtagかチェック
-    const tagExists = db.prepare('SELECT COUNT(*) as count FROM tags WHERE name = ?').get(tagName).count > 0;
-    const gtagExists = db.prepare('SELECT COUNT(*) as count FROM gtags WHERE name = ?').get(tagName).count > 0;
+    const tagExistsResult = await get('SELECT COUNT(*) as count FROM tags WHERE name = $1', [tagName]);
+    const tagExists = tagExistsResult.count > 0;
+    const gtagExistsResult = await get('SELECT COUNT(*) as count FROM gtags WHERE name = $1', [tagName]);
+    const gtagExists = gtagExistsResult.count > 0;
     
     // タグもgtagも存在しない場合
     if (!tagExists && !gtagExists) {
@@ -40,9 +42,8 @@ router.get('/api/data/:tagName', async (req, res) => {
     // gtagの場合
     if (gtagExists) {
       // gtagの定義を取得
-      const gtag = db.prepare('SELECT * FROM gtags WHERE name = ?').get(tagName);
-      const definition = JSON.parse(gtag.definition);
-      
+      const gtag = await get('SELECT * FROM gtags WHERE name = $1', [tagName]);
+
       // メタデータを構築
       const metadata = {
         id: gtag.id,
@@ -83,39 +84,42 @@ router.get('/api/data/:tagName', async (req, res) => {
     
     // 通常タグの場合
     // タグ名から整数IDを取得
-    const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagName);
-    
+    const tag = await get('SELECT id FROM tags WHERE name = $1', [tagName]);
+
     if (!tag) {
       return res.status(404).json({ error: `Tag ${tagName} not found` });
     }
-    
+
     // タグのメタデータを取得（表示名オプション付き）
     const metadata = getTagMetadata(tagName, {
       display: display === 'true',
       lang,
       showUnit: showUnit === 'true'
     });
-    
+
     // 時間範囲のフィルタリング（整数型のtag_idを使用）
-    let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+    let sql = 'SELECT timestamp, value FROM tag_data WHERE tag_id = $1';
     const params = [tag.id]; // 整数IDを使用
-    
+    let paramIndex = 2;
+
     if (start) {
-      query += ' AND timestamp >= ?';
+      sql += ` AND timestamp >= $${paramIndex}`;
       params.push(new Date(start).toISOString());
+      paramIndex++;
     }
-    
+
     if (end) {
-      query += ' AND timestamp <= ?';
+      sql += ` AND timestamp <= $${paramIndex}`;
       params.push(new Date(end).toISOString());
+      paramIndex++;
     }
-    
-    query += ' ORDER BY timestamp';
-    
+
+    sql += ' ORDER BY timestamp';
+
     // レコード数の上限を適用
-    query += ` LIMIT ${config.api.maxRecordsPerRequest}`;
-    
-    const tagData = db.prepare(query).all(...params);
+    sql += ` LIMIT ${config.api.maxRecordsPerRequest}`;
+
+    const tagData = await query(sql, params);
     
     // タイムシフトを適用
     let processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
@@ -248,8 +252,9 @@ router.get('/api/batch', async (req, res) => {
     
     for (const tagName of tagNames) {
       // gtagかどうか判定
-      const isGtag = db.prepare('SELECT COUNT(*) as count FROM gtags WHERE name = ?').get(tagName).count > 0;
-      
+      const gtagCheckResult = await get('SELECT COUNT(*) as count FROM gtags WHERE name = $1', [tagName]);
+      const isGtag = gtagCheckResult.count > 0;
+
       if (isGtag) {
         gtagNames.push(tagName);
       } else if (metadataMap[tagName]) {
@@ -260,33 +265,36 @@ router.get('/api/batch', async (req, res) => {
     // 通常タグの処理
     for (const tagName of normalTagNames) {
       // タグ名から整数IDを取得
-      const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagName);
-      
+      const tag = await get('SELECT id FROM tags WHERE name = $1', [tagName]);
+
       if (!tag) {
         console.warn(`タグ名 ${tagName} に対応するタグが見つかりません`);
         continue;
       }
-      
+
       // 時間範囲のフィルタリング
-      let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+      let sql = 'SELECT timestamp, value FROM tag_data WHERE tag_id = $1';
       const params = [tag.id]; // 整数IDを使用
-      
+      let paramIndex = 2;
+
       if (start) {
-        query += ' AND timestamp >= ?';
+        sql += ` AND timestamp >= $${paramIndex}`;
         params.push(new Date(start).toISOString());
+        paramIndex++;
       }
-      
+
       if (end) {
-        query += ' AND timestamp <= ?';
+        sql += ` AND timestamp <= $${paramIndex}`;
         params.push(new Date(end).toISOString());
+        paramIndex++;
       }
-      
-      query += ' ORDER BY timestamp';
-      
+
+      sql += ' ORDER BY timestamp';
+
       // レコード数の上限を適用
-      query += ` LIMIT ${config.api.maxRecordsPerRequest}`;
-      
-      const tagData = db.prepare(query).all(...params);
+      sql += ` LIMIT ${config.api.maxRecordsPerRequest}`;
+
+      const tagData = await query(sql, params);
       
       // タイムシフトを適用
       let processedData = shouldTimeShift ? getTimeShiftedData(tagData, true) : tagData;
@@ -365,8 +373,8 @@ router.get('/api/batch', async (req, res) => {
     // gtagの処理
     for (const tagName of gtagNames) {
       // gtagの定義を取得
-      const gtag = db.prepare('SELECT * FROM gtags WHERE name = ?').get(tagName);
-      
+      const gtag = await get('SELECT * FROM gtags WHERE name = $1', [tagName]);
+
       if (gtag) {
         // メタデータを構築
         const metadata = {
@@ -413,7 +421,7 @@ router.get('/api/batch', async (req, res) => {
 });
 
 // 最新値取得（現在のポーリングをシミュレート）
-router.get('/api/current', (req, res) => {
+router.get('/api/current', async (req, res) => {
   const { tags, display = 'false', lang = 'ja', showUnit = 'false', zeroAsNull = 'false' } = req.query;
   
   if (!tags) {
@@ -437,20 +445,20 @@ router.get('/api/current', (req, res) => {
       // タグが存在するか確認
       if (metadataMap[tagName]) {
         // タグ名から整数IDを取得
-        const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagName);
-        
+        const tag = await get('SELECT id FROM tags WHERE name = $1', [tagName]);
+
         if (!tag) {
           console.warn(`タグ名 ${tagName} に対応するタグが見つかりません`);
           continue;
         }
-        
+
         // 最新のデータポイントを取得（タイムシフトを適用するため最新10点を取得）
-        const latestData = db.prepare(`
-          SELECT timestamp, value FROM tag_data 
-          WHERE tag_id = ? 
-          ORDER BY timestamp DESC 
+        const latestData = await query(`
+          SELECT timestamp, value FROM tag_data
+          WHERE tag_id = $1
+          ORDER BY timestamp DESC
           LIMIT 10
-        `).all(tag.id); // 整数IDを使用
+        `, [tag.id]); // 整数IDを使用
         
         if (latestData.length > 0) {
           // タイムシフトを適用
@@ -535,16 +543,16 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     
     // 通常タグの処理
     for (const tagName of sourceTags) {
-      const tag = db.prepare('SELECT id, name FROM tags WHERE source_tag = ? OR name = ?').get(tagName, tagName);
+      const tag = await get('SELECT id, name FROM tags WHERE source_tag = $1 OR name = $1', [tagName]);
       if (tag) {
         normalTagIds.push(tag.id);
         tagIdToName.set(tag.id, tag.name);
       }
     }
-    
+
     // gtagの処理
     for (const gtagName of gtags) {
-      const gtag = db.prepare('SELECT id, name FROM gtags WHERE name = ?').get(gtagName);
+      const gtag = await get('SELECT id, name FROM gtags WHERE name = $1', [gtagName]);
       if (gtag) {
         gtagIds.push(gtag.id);
         gtagIdToName.set(gtag.id, gtag.name);
@@ -583,7 +591,7 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       const gtagHeaderMap = {};
       if (shouldIncludeGtags && gtagIds.length > 0) {
         for (const gtagId of gtagIds) {
-          const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(gtagId);
+          const gtag = await get('SELECT * FROM gtags WHERE id = $1', [gtagId]);
           let displayName = gtag.description || gtag.name;
           if (shouldShowUnit && gtag.unit) {
             displayName = `${displayName} (${gtag.unit})`;
@@ -627,11 +635,11 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
   for (const tagId of allTagIds) {
     // gtagかどうかチェック
     const isGtag = gtagIds.includes(tagId);
-    
+
     let data;
     if (isGtag) {
       // gtagの場合
-      const gtag = db.prepare('SELECT * FROM gtags WHERE id = ?').get(tagId);
+      const gtag = await get('SELECT * FROM gtags WHERE id = $1', [tagId]);
       data = await getGtagData(gtag, { start, end });
       
       // 修正2: gtagにも処理を適用（追加）
@@ -662,21 +670,24 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       }
     } else {
       // 通常タグの場合
-      let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+      let sql = 'SELECT timestamp, value FROM tag_data WHERE tag_id = $1';
       const params = [tagId];
-      
+      let paramIndex = 2;
+
       if (start) {
-        query += ' AND timestamp >= ?';
+        sql += ` AND timestamp >= $${paramIndex}`;
         params.push(new Date(start).toISOString());
+        paramIndex++;
       }
-      
+
       if (end) {
-        query += ' AND timestamp <= ?';
+        sql += ` AND timestamp <= $${paramIndex}`;
         params.push(new Date(end).toISOString());
+        paramIndex++;
       }
-      
-      query += ' ORDER BY timestamp';
-      data = db.prepare(query).all(...params);
+
+      sql += ' ORDER BY timestamp';
+      data = await query(sql, params);
       
           // 処理オプションの適用
           if (processing) {

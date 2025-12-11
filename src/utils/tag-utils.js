@@ -1,13 +1,13 @@
 // src/utils/tag-utils.js
-const { db } = require('../db');
+const { get } = require('../db');
 
 /**
  * タグ名から整数IDを取得
  * @param {string} tagName - タグ名
- * @returns {number|null} 整数ID（存在しない場合はnull）
+ * @returns {Promise<number|null>} 整数ID（存在しない場合はnull）
  */
-function getTagIdFromName(tagName) {
-  const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(tagName);
+async function getTagIdFromName(tagName) {
+  const tag = await get('SELECT id FROM tags WHERE name = $1', [tagName]);
   return tag ? tag.id : null;
 }
 
@@ -18,36 +18,38 @@ function getTagIdFromName(tagName) {
  * @param {boolean} options.display - 表示名を含めるかどうか
  * @param {string} options.lang - 言語コード
  * @param {boolean} options.showUnit - 単位を表示名と結合して表示するかどうか
- * @returns {Object} タグメタデータ
+ * @returns {Promise<Object>} タグメタデータ
  */
-function getTagMetadata(tagName, options = {}) {
+async function getTagMetadata(tagName, options = {}) {
   const { display = false, lang = 'ja', showUnit = false } = options;
-  
+
   // タグ名から整数IDを取得してメタデータを取得
-  const metadata = db.prepare('SELECT * FROM tags WHERE name = ?').get(tagName);
-  
+  const metadata = await get('SELECT * FROM tags WHERE name = $1', [tagName]);
+
   // タグが存在しないか、表示名が不要な場合はそのまま返す
   if (!metadata || !display) {
     return metadata;
   }
-  
+
   // 表示名と単位を取得（この時点でmetadata.idは整数型）
-  const translation = db.prepare(
-    'SELECT display_name, unit FROM tag_translations WHERE tag_id = ? AND language = ?'
-  ).get(metadata.id, lang);
-  
+  const translation = await get(
+    'SELECT display_name, unit FROM tag_translations WHERE tag_id = $1 AND language = $2',
+    [metadata.id, lang]
+  );
+
   // 指定言語の表示名がない場合はデフォルト言語を試す
   if (!translation && lang !== 'default') {
-    const defaultTranslation = db.prepare(
-      'SELECT display_name, unit FROM tag_translations WHERE tag_id = ? AND language = ?'
-    ).get(metadata.id, 'default');
-    
+    const defaultTranslation = await get(
+      'SELECT display_name, unit FROM tag_translations WHERE tag_id = $1 AND language = $2',
+      [metadata.id, 'default']
+    );
+
     if (defaultTranslation) {
       // 単位を含めるかどうかで表示名を決定
-      const displayName = showUnit && defaultTranslation.unit 
+      const displayName = showUnit && defaultTranslation.unit
         ? `${defaultTranslation.display_name} (${defaultTranslation.unit})`
         : defaultTranslation.display_name;
-        
+
       return {
         ...metadata,
         display_name: displayName,
@@ -55,21 +57,21 @@ function getTagMetadata(tagName, options = {}) {
       };
     }
   }
-  
+
   // 表示名があれば追加して返す
   if (translation) {
     // 単位を含めるかどうかで表示名を決定
-    const displayName = showUnit && translation.unit 
+    const displayName = showUnit && translation.unit
       ? `${translation.display_name} (${translation.unit})`
       : translation.display_name;
-      
+
     return {
       ...metadata,
       display_name: displayName,
       unit: translation.unit || metadata.unit
     };
   }
-  
+
   // 表示名がない場合はタグIDをそのまま返す
   return {
     ...metadata,
@@ -116,23 +118,23 @@ function addSuffixToDuplicateDisplayNames(metadataMap) {
  * @param {boolean} options.display - 表示名を含めるかどうか
  * @param {string} options.lang - 言語コード
  * @param {boolean} options.showUnit - 単位を表示名と結合して表示するかどうか
- * @returns {Object} タグ名をキーとするメタデータオブジェクト
+ * @returns {Promise<Object>} タグ名をキーとするメタデータオブジェクト
  */
-function getTagsMetadata(tagNames, options = {}) {
+async function getTagsMetadata(tagNames, options = {}) {
   const result = {};
-  
+
   for (const tagName of tagNames) {
-    const metadata = getTagMetadata(tagName, options);
+    const metadata = await getTagMetadata(tagName, options);
     if (metadata) {
       result[tagName] = metadata;
     }
   }
-  
+
   // 表示名が必要な場合、重複チェックを行い必要に応じてsuffixを追加
   if (options.display === true) {
     return addSuffixToDuplicateDisplayNames(result);
   }
-  
+
   return result;
 }
 

@@ -3,7 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const { db } = require('../db');
+const { query, get, run } = require('../db');
 const mathjs = require('mathjs');
 const os = require('os');
 const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('./data-processing');
@@ -71,35 +71,35 @@ function detectChangedGtagFiles() {
 /**
  * 柔軟なタグ識別子を解析して適切なタグを見つける
  * @param {string|number} identifier - タグ識別子
- * @returns {Array<Object>} 見つかったタグのリスト
+ * @returns {Promise<Array<Object>>} 見つかったタグのリスト
  */
-function resolveTagIdentifier(identifier) {
+async function resolveTagIdentifier(identifier) {
   try {
     // 整数の場合はタグIDとして使用
     if (typeof identifier === 'number' || /^\d+$/.test(identifier)) {
       const tagId = parseInt(identifier, 10);
-      const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId);
+      const tag = await get('SELECT * FROM tags WHERE id = $1', [tagId]);
       return tag ? [tag] : [];
     }
-    
+
     // 文字列の場合
     if (typeof identifier === 'string') {
       // ピリオドを含む場合はタグ名として検索
       if (identifier.includes('.')) {
-        const tag = db.prepare('SELECT * FROM tags WHERE name = ?').get(identifier);
+        const tag = await get('SELECT * FROM tags WHERE name = $1', [identifier]);
         return tag ? [tag] : [];
       }
-      
+
       // コロンを含む場合は「設備:ソースタグ」として解釈
       if (identifier.includes(':')) {
         const [equipment, sourceTag] = identifier.split(':');
-        return db.prepare('SELECT * FROM tags WHERE equipment = ? AND source_tag = ?').all(equipment, sourceTag);
+        return await query('SELECT * FROM tags WHERE equipment = $1 AND source_tag = $2', [equipment, sourceTag]);
       }
-      
+
       // それ以外はソースタグとして検索
-      return db.prepare('SELECT * FROM tags WHERE source_tag = ?').all(identifier);
+      return await query('SELECT * FROM tags WHERE source_tag = $1', [identifier]);
     }
-    
+
     return [];
   } catch (error) {
     console.error(`タグ識別子の解決中にエラーが発生しました: ${identifier}`, error);
@@ -109,44 +109,44 @@ function resolveTagIdentifier(identifier) {
 
 /**
  * gtag定義ファイルを読み込み、DBに登録
- * @param {Object} fileInfo - ファイル情報 
+ * @param {Object} fileInfo - ファイル情報
  */
 async function importGtagDefinition(fileInfo) {
   try {
     const fileContent = await fs.readJson(fileInfo.path);
-    
+
     if (!fileContent.name || !fileContent.type) {
       throw new Error(`必須フィールドが不足しています: ${fileInfo.name}`);
     }
-    
+
     // 設備名を抽出（タグ名から設備部分を取得）
-    const equipment = fileContent.name.includes('.') 
-      ? fileContent.name.split('.')[0] 
+    const equipment = fileContent.name.includes('.')
+      ? fileContent.name.split('.')[0]
       : '';
-    
+
     // 現在のタイムスタンプ
     const now = new Date().toISOString();
-    
+
     // 入力を処理
     const inputs = Array.isArray(fileContent.inputs) ? fileContent.inputs : [];
-    
+
     // 保存用の定義オブジェクトを作成
     const definition = {
       ...fileContent,
       equipment: equipment,
       sourceTags: inputs
     };
-    
+
     // gtagsテーブルに挿入または更新
-    const existingGtag = db.prepare('SELECT id FROM gtags WHERE name = ?').get(fileContent.name);
-    
+    const existingGtag = await get('SELECT id FROM gtags WHERE name = $1', [fileContent.name]);
+
     if (existingGtag) {
       // 更新
-      db.prepare(`
-        UPDATE gtags 
-        SET equipment = ?, description = ?, unit = ?, type = ?, definition = ?, updated_at = ?
-        WHERE id = ?
-      `).run(
+      await run(`
+        UPDATE gtags
+        SET equipment = $1, description = $2, unit = $3, type = $4, definition = $5, updated_at = $6
+        WHERE id = $7
+      `, [
         equipment,
         fileContent.description || '',
         fileContent.unit || '',
@@ -154,14 +154,15 @@ async function importGtagDefinition(fileInfo) {
         JSON.stringify(definition),
         now,
         existingGtag.id
-      );
+      ]);
       console.log(`gtag「${fileContent.name}」を更新しました`);
     } else {
       // 新規作成
-      const result = db.prepare(`
+      const result = await run(`
         INSERT INTO gtags (name, equipment, description, unit, type, definition, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `, [
         fileContent.name,
         equipment,
         fileContent.description || '',
@@ -170,10 +171,10 @@ async function importGtagDefinition(fileInfo) {
         JSON.stringify(definition),
         now,
         now
-      );
-      console.log(`新しいgtag「${fileContent.name}」を登録しました（ID: ${result.lastInsertRowid}）`);
+      ]);
+      console.log(`新しいgtag「${fileContent.name}」を登録しました（ID: ${result.lastID}）`);
     }
-    
+
     return definition;
   } catch (error) {
     console.error(`gtag定義のインポート中にエラーが発生しました (${fileInfo.name}):`, error);
@@ -525,37 +526,38 @@ async function executeCustomImplementation(implementationPath, args, inputTagsDa
 async function getInputTagsData(inputs, options = {}) {
   const { start, end } = options;
   const inputTagsData = {};
-  
+
   for (const input of inputs) {
     // タグ識別子を解決
-    const tags = resolveTagIdentifier(input);
-    
+    const tags = await resolveTagIdentifier(input);
+
     if (tags.length === 0) {
       console.warn(`入力タグ「${input}」が見つかりません。スキップします。`);
       continue;
     }
-    
+
     // 複数のタグが見つかった場合は最初のものを使用
     const tag = tags[0];
-    
+
     // タグデータを取得
-    let query = 'SELECT timestamp, value FROM tag_data WHERE tag_id = ?';
+    let sql = 'SELECT timestamp, value FROM tag_data WHERE tag_id = $1';
     const params = [tag.id];
-    
+    let paramIndex = 1;
+
     if (start) {
-      query += ' AND timestamp >= ?';
+      sql += ` AND timestamp >= $${++paramIndex}`;
       params.push(new Date(start).toISOString());
     }
-    
+
     if (end) {
-      query += ' AND timestamp <= ?';
+      sql += ` AND timestamp <= $${++paramIndex}`;
       params.push(new Date(end).toISOString());
     }
-    
-    query += ' ORDER BY timestamp';
-    inputTagsData[input] = db.prepare(query).all(...params);
+
+    sql += ' ORDER BY timestamp';
+    inputTagsData[input] = await query(sql, params);
   }
-  
+
   return inputTagsData;
 }
 
@@ -719,46 +721,46 @@ async function getGtagData(gtag, options = {}) {
 async function executeProcess(target, type, params = {}, options = {}) {
   try {
     // 対象タグの取得
-    const tags = resolveTagIdentifier(target);
-    
+    const tags = await resolveTagIdentifier(target);
+
     if (tags.length === 0) {
       throw new Error(`対象タグ「${target}」が見つかりません`);
     }
-    
+
     // 対象タグのデータを取得
     const tag = tags[0];
     const inputTagsData = await getInputTagsData([tag.name], options);
-    
+
     if (Object.keys(inputTagsData).length === 0 || !inputTagsData[tag.name] || inputTagsData[tag.name].length === 0) {
       return [];
     }
-    
+
     // タイプに応じて処理を実行
     switch (type) {
       case 'moving_average':
         return calculateMovingAverage(
-          inputTagsData[tag.name], 
+          inputTagsData[tag.name],
           params.window || 5
         );
-        
+
       case 'zscore':
         return calculateZScore(
-          inputTagsData[tag.name], 
+          inputTagsData[tag.name],
           params.window
         );
-        
+
       case 'deviation':
         return calculateDeviation(
-          inputTagsData[tag.name], 
+          inputTagsData[tag.name],
           params.window
         );
-        
+
       case 'raw':
         return inputTagsData[tag.name].map(point => ({
           timestamp: point.timestamp,
           value: point.value
         }));
-        
+
       default:
         throw new Error(`未対応の処理タイプ: ${type}`);
     }
