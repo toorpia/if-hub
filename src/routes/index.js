@@ -9,6 +9,7 @@ const tagsRoutes = require('./tags');
 const equipmentRoutes = require('./equipment');
 const dataRoutes = require('./data');
 const gtagsRoutes = require('./gtags');
+const dashboardRoutes = require('./dashboard');
 
 // 各ルーターを登録
 router.use(systemRoutes);
@@ -16,5 +17,6 @@ router.use(tagsRoutes);
 router.use(equipmentRoutes);
 router.use(dataRoutes);
 router.use(gtagsRoutes);
+router.use(dashboardRoutes);
 
 module.exports = router;

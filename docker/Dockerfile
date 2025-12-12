@@ -1,3 +1,17 @@
+# ビルドステージ: フロントエンドをビルド
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# フロントエンドの依存関係をインストール
+COPY frontend/package*.json ./
+RUN npm install
+
+# フロントエンドのソースコードをコピーしてビルド
+COPY frontend/ ./
+RUN npm run build
+
+# 本番ステージ: バックエンドとビルド済みフロントエンドを配置
 FROM node:22-alpine
 
 # タイムゾーンパッケージ、Pythonとデータ分析パッケージをインストール（apkパッケージを使用）
@@ -15,6 +29,13 @@ COPY package*.json ./
 
 # 依存関係をインストール
 RUN npm install
+
+# バックエンドのソースコードをコピー
+COPY src/ ./src/
+
+# ビルド済みフロントエンドを public/ ディレクトリにコピー
+# vite.config.jsで outDir: '../public' 設定のため、/app/public にビルドされる
+COPY --from=frontend-builder /app/public /app/public
 
 # 必要なディレクトリを作成し、適切な権限を設定
 RUN mkdir -p /app/static_equipment_data /app/logs /app/db /app/gtags \
