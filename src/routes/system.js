@@ -1,17 +1,18 @@
 // src/routes/system.js
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { get } = require('../db');
 const config = require('../config');
 
 // システム情報
-router.get('/api/system/info', (req, res) => {
+router.get('/api/system/info', async (req, res) => {
   try {
     // タグ数の取得
-    const tagCount = db.prepare('SELECT COUNT(*) as count FROM tags').get().count;
-    
-    // 設備数の取得
-    const equipmentCount = db.prepare('SELECT COUNT(DISTINCT equipment) as count FROM tags').get().count;
+    const tagCountResult = await get('SELECT COUNT(*) as count FROM tags');
+    const tagCount = parseInt(tagCountResult.count);
+
+    // 設備数の取得 (equipment列は削除されたため、常に0を返す)
+    const equipmentCount = 0;
     
     res.json({
       name: 'IndustryFlow Hub',
@@ -19,7 +20,7 @@ router.get('/api/system/info', (req, res) => {
       tagCount,
       equipmentCount,
       environment: config.environment,
-      storage: 'SQLite database'
+      storage: 'TimescaleDB (PostgreSQL)'
     });
   } catch (error) {
     console.error('システム情報の取得中にエラーが発生しました:', error);
@@ -28,23 +29,25 @@ router.get('/api/system/info', (req, res) => {
 });
 
 // ステータスエンドポイント（ヘルスチェック用）
-router.get('/api/status', (req, res) => {
+router.get('/api/status', async (req, res) => {
   try {
     // タグ数の取得
-    const tagCount = db.prepare('SELECT COUNT(*) as count FROM tags').get().count;
-    
-    // 設備数の取得
-    const equipmentCount = db.prepare('SELECT COUNT(DISTINCT equipment) as count FROM tags').get().count;
-    
+    const tagCountResult = await get('SELECT COUNT(*) as count FROM tags');
+    const tagCount = parseInt(tagCountResult.count);
+
+    // 設備数の取得 (equipment列は削除されたため、常に0を返す)
+    const equipmentCount = 0;
+
     // データポイント数の取得
-    const dataPointCount = db.prepare('SELECT COUNT(*) as count FROM tag_data').get().count;
-    
+    const dataPointCountResult = await get('SELECT COUNT(*) as count FROM tag_data');
+    const dataPointCount = parseInt(dataPointCountResult.count);
+
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       environment: config.environment,
       database: {
-        type: 'SQLite',
+        type: 'TimescaleDB (PostgreSQL)',
         tags: tagCount,
         equipment: equipmentCount,
         dataPoints: dataPointCount

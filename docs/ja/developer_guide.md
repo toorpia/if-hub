@@ -17,17 +17,17 @@ IF-HUBは、以下のコンポーネントで構成されるモジュラー設�
 ```
 +--------------------+     +--------------------+     +-----------------+
 |                    |     |                    |     |                 |
-|  クライアント       |<--->|  Express API サーバー |<--->|  SQLiteデータベース |
-|                    |     |                    |     |                 |
+|  クライアント       |<--->|  Express API サーバー |<--->|  TimescaleDB    |
+|                    |     |                    |     |  (PostgreSQL)   |
 +--------------------+     +--------------------+     +-----------------+
                               |          ^
                               v          |
-                           +--------------------+    
-                           |                    |    
-                           |  外部プロセッサ      |    
-                           |  フレームワーク      |    
-                           |                    |    
-                           +--------------------+    
+                           +--------------------+
+                           |                    |
+                           |  外部プロセッサ      |
+                           |  フレームワーク      |
+                           |                    |
+                           +--------------------+
 ```
 
 ### 主要モジュール
@@ -38,7 +38,7 @@ IF-HUBは、以下のコンポーネントで構成されるモジュラー設�
    - エラーハンドリングとレスポンス形成
 
 2. **データベース管理** (`src/db.js`):
-   - SQLiteデータベース接続管理
+   - TimescaleDB（PostgreSQL）接続管理
    - テーブル定義とデータ検索
 
 3. **CSVインポーター** (`src/utils/csv-importer.js`):
@@ -57,7 +57,7 @@ IF-HUBは、以下のコンポーネントで構成されるモジュラー設�
 
 1. **データ読み込み**:
    ```
-   静的CSVファイル → CSVインポーター → SQLiteデータベース
+   静的CSVファイル → CSVインポーター → TimescaleDBデータベース
    ```
 
 2. **API呼び出し**:
@@ -72,7 +72,7 @@ IF-HUBは、以下のコンポーネントで構成されるモジュラー設�
 
 ## データベース設計
 
-IF-HUBは、SQLiteデータベースを使用して時系列データとメタデータを格納します。
+IF-HUBは、TimescaleDB（PostgreSQLの拡張）を使用して時系列データとメタデータを格納します。TimescaleDBは時系列データに特化した最適化を提供し、大規模データでも高速なクエリパフォーマンスを実現します。
 
 ### テーブル構造
 
@@ -80,14 +80,14 @@ IF-HUBは、SQLiteデータベースを使用して時系列データとメタ�
 タグのメタデータを格納します。
 
 ```sql
-CREATE TABLE IF NOT EXISTS tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE tags (
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   source_tag TEXT NOT NULL,
   unit TEXT,
-  min REAL,
-  max REAL
-)
+  min DOUBLE PRECISION,
+  max DOUBLE PRECISION
+);
 ```
 
 | カラム | 型 | 説明 |
@@ -102,36 +102,41 @@ CREATE TABLE IF NOT EXISTS tags (
 IF-HUBのデータベース設計では、tagsテーブルは純粋なタグプールとして機能します。設備情報はデータベースに格納されず、設備とタグの関連付けは各設備のconfig.yamlファイルで管理されます。この設計により、同一のソースタグを複数の設備で共有する設備横断タグ管理が実現されています。
 
 #### tag_data テーブル
-時系列データポイントを格納します。
+時系列データポイントを格納します。TimescaleDBのHypertableとして定義され、時系列データに最適化されています。
 
 ```sql
-CREATE TABLE IF NOT EXISTS tag_data (
+CREATE TABLE tag_data (
   tag_id INTEGER NOT NULL,
-  timestamp TEXT NOT NULL,
-  value REAL,
-  PRIMARY KEY (tag_id, timestamp),
-  FOREIGN KEY (tag_id) REFERENCES tags(id)
-)
+  timestamp TIMESTAMPTZ NOT NULL,
+  value DOUBLE PRECISION,
+  PRIMARY KEY (tag_id, timestamp)
+);
+
+-- Convert to hypertable (30-day chunks - optimized for 1-minute sampling)
+SELECT create_hypertable('tag_data', 'timestamp',
+  chunk_time_interval => INTERVAL '30 days',
+  if_not_exists => TRUE
+);
 ```
 
 | カラム | 型 | 説明 |
 |-------|------|-----------|
 | tag_id | INTEGER | タグID（tags.idへの外部キー）|
-| timestamp | TEXT | 時刻（ISO 8601形式）|
-| value | REAL | データ値 |
+| timestamp | TIMESTAMPTZ | 時刻（タイムゾーン付きタイムスタンプ）|
+| value | DOUBLE PRECISION | データ値（倍精度浮動小数点数）|
 
 #### tag_translations テーブル
 タグIDと表示名のマッピングを格納します。
 
 ```sql
-CREATE TABLE IF NOT EXISTS tag_translations (
+CREATE TABLE tag_translations (
   tag_id INTEGER NOT NULL,
   language TEXT NOT NULL,
   display_name TEXT NOT NULL,
   unit TEXT,
   PRIMARY KEY (tag_id, language),
-  FOREIGN KEY (tag_id) REFERENCES tags(id)
-)
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
 ```
 
 | カラム | 型 | 説明 |
@@ -146,41 +151,58 @@ CREATE TABLE IF NOT EXISTS tag_translations (
 効率的なクエリのために以下のインデックスが作成されています：
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)
-CREATE INDEX IF NOT EXISTS idx_tags_equipment ON tags(equipment)
-CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)
-CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)
+CREATE INDEX idx_tags_source_tag ON tags(source_tag);
+CREATE INDEX idx_tags_name ON tags(name);
+CREATE INDEX idx_tag_translations_tag_id ON tag_translations(tag_id);
 ```
+
+**注意**: `tag_data`テーブルはTimescaleDBのHypertableとして定義されているため、タイムスタンプベースのクエリは自動的に最適化されます。
 
 ### クエリ最適化
 
 大規模データセットでのパフォーマンスを最適化するためのヒント：
 
-1. **時間範囲の絞り込み**:
+1. **時間範囲の絞り込み**（TimescaleDBで自動最適化）:
    ```sql
-   SELECT timestamp, value FROM tag_data 
-   WHERE tag_id = ? AND timestamp >= ? AND timestamp <= ?
-   ORDER BY timestamp
+   SELECT timestamp, value FROM tag_data
+   WHERE tag_id = $1 AND timestamp >= $2 AND timestamp <= $3
+   ORDER BY timestamp;
    ```
 
 2. **データ量の制限**:
    ```sql
    -- 最新N件のデータのみを取得
-   SELECT timestamp, value FROM tag_data 
-   WHERE tag_id = ? 
-   ORDER BY timestamp DESC 
-   LIMIT 100
+   SELECT timestamp, value FROM tag_data
+   WHERE tag_id = $1
+   ORDER BY timestamp DESC
+   LIMIT 100;
    ```
 
-3. **トランザクションの活用**:
+3. **トランザクションの活用**（非同期処理）:
    ```javascript
-   db.exec('BEGIN TRANSACTION');
+   const client = await pool.connect();
    try {
+     await client.query('BEGIN');
      // 複数のデータ挿入/更新操作
-     db.exec('COMMIT');
+     await client.query('COMMIT');
    } catch (error) {
-     db.exec('ROLLBACK');
+     await client.query('ROLLBACK');
+     throw error;
+   } finally {
+     client.release();
    }
+   ```
+
+4. **TimescaleDB特有の最適化機能**:
+   ```sql
+   -- Time bucketing（ダウンサンプリング）
+   SELECT time_bucket('5 minutes', timestamp) AS bucket, avg(value)
+   FROM tag_data
+   WHERE tag_id = $1
+   GROUP BY bucket;
+
+   -- Compression（古いデータの自動圧縮）
+   SELECT add_compression_policy('tag_data', INTERVAL '30 days');
    ```
 
 ## コード詳細
@@ -213,18 +235,19 @@ async function startServer() {
 
 ### データ読み込みロジック
 
-CSVからデータを読み込み、SQLiteデータベースに取り込むロジックの流れ：
+CSVからデータを読み込み、TimescaleDBデータベースに取り込むロジックの流れ：
 
 1. `src/utils/csv-importer.js`が`static_equipment_data`ディレクトリからCSVファイルを検索
 2. ファイル名からequipmentIDを抽出（例: `Pump01.csv` → `Pump01`）
 3. CSVヘッダーからタグ名（source_tag）を抽出
 4. 各タグのメタデータを`tags`テーブルに登録（tagsテーブルのsource_tagカラムにソースタグ名を保存）
-5. 各データポイントを`tag_data`テーブルに登録
+5. 各データポイントを`tag_data`テーブルに登録（Hypertableに自動的にパーティショニング）
 
 重要な最適化：
-- チャンク処理によるメモリ効率の向上
-- トランザクション使用によるインサート速度の向上
-- インデックスによる検索速度の最適化
+- 非同期処理（async/await）によるスループットの向上
+- バルクインサートによるインサート速度の向上
+- TimescaleDBのHypertableによる時系列データの自動最適化
+- 自動圧縮によるストレージ効率の向上（90%+削減）
 
 ### タグIDとソースタグの関係
 
@@ -526,20 +549,20 @@ function findTagsBySourceTag(sourceTag, equipment = null) {
 
 ### APIエンドポイント実装
 
-APIエンドポイントの基本的な実装パターン：
+APIエンドポイントの基本的な実装パターン（非同期処理）：
 
 ```javascript
-app.get('/api/endpoint', (req, res) => {
+app.get('/api/endpoint', async (req, res) => {
   try {
     // 1. リクエストパラメータを取得
     const { param1, param2 } = req.query;
-    
-    // 2. データベースからデータを取得
-    const data = db.prepare('SELECT ... WHERE ...').all(...params);
-    
+
+    // 2. データベースからデータを取得（非同期）
+    const data = await db.query('SELECT ... WHERE ... ', [param1, param2]);
+
     // 3. 必要な後処理を実行
-    const processedData = someProcessing(data);
-    
+    const processedData = await someProcessing(data);
+
     // 4. レスポンスを返す
     res.json({
       metadata: { ... },
@@ -948,27 +971,33 @@ app.get('/api/data/sourceTag/:sourceTag', async (req, res) => {
    - TTL（有効期限）を設定して定期的に更新
 
 ```javascript
-// キャッシング例
+// キャッシング例（非同期処理）
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 300 }); // 5分のTTL
 
-app.get('/api/data/:tagId', (req, res) => {
+app.get('/api/data/:tagId', async (req, res) => {
   const { tagId } = req.params;
   const cacheKey = `data_${tagId}_${JSON.stringify(req.query)}`;
-  
+
   // キャッシュをチェック
   const cachedData = cache.get(cacheKey);
   if (cachedData) {
     return res.json(cachedData);
   }
-  
+
   // 通常の処理...
-  
+  const result = await fetchDataFromDatabase(tagId, req.query);
+
   // 結果をキャッシュに保存
   cache.set(cacheKey, result);
   res.json(result);
 });
 ```
+
+5. **TimescaleDB固有の機能活用**:
+   - Continuous Aggregates（連続集約）による事前計算
+   - Compression（圧縮）による高速クエリ
+   - Hypertableによる自動パーティショニング
 
 ## Fetcher/Ingester開発ガイド
 

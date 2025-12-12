@@ -1,13 +1,13 @@
 // src/routes/equipment.js
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { get } = require('../db');
 const { getTagsMetadata } = require('../utils/tag-utils');
 const equipmentConfigManager = require('../services/equipment-config-manager');
 const { sortTagsByConfigOrder } = require('../utils/config-order-sort');
 
 // 設備一覧
-router.get('/api/equipment', (req, res) => {
+router.get('/api/equipment', async (req, res) => {
   const { includeTags = 'false', display = 'false', lang = 'ja', showUnit = 'false', includeGtags = 'true' } = req.query;
   
   try {
@@ -48,7 +48,7 @@ router.get('/api/equipment', (req, res) => {
         // 通常タグをデータベースから取得
         const tags = [];
         for (const tagName of sourceTagNames) {
-          const tag = db.prepare('SELECT * FROM tags WHERE source_tag = ? OR name = ?').get(tagName, tagName);
+          const tag = await get('SELECT * FROM tags WHERE source_tag = $1 OR name = $1', [tagName]);
           if (tag) {
             // 設備情報を追加
             const equipments = equipmentConfigManager.getEquipmentsUsingSourceTag(tag.source_tag || tag.name);
@@ -58,11 +58,11 @@ router.get('/api/equipment', (req, res) => {
             });
           }
         }
-        
+
         // gtagをデータベースから取得
         let gtags = [];
         for (const gtagName of gtagNames) {
-          const gtag = db.prepare('SELECT * FROM gtags WHERE name = ?').get(gtagName);
+          const gtag = await get('SELECT * FROM gtags WHERE name = $1', [gtagName]);
           if (gtag) {
             const definition = JSON.parse(gtag.definition);
             const equipments = equipmentConfigManager.getEquipmentsUsingGtag(gtag.name);
@@ -87,7 +87,7 @@ router.get('/api/equipment', (req, res) => {
         // タグに表示名を含める場合
         if (shouldDisplay) {
           const tagNames = tags.map(tag => tag.name);
-          const metadataMap = getTagsMetadata(tagNames, {
+          const metadataMap = await getTagsMetadata(tagNames, {
             display: true,
             lang,
             showUnit: shouldShowUnit

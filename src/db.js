@@ -1,94 +1,223 @@
 // src/db.js
 // Copyright (c) 2025 toorPIA / toor Inc.
-const sqlite3 = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs-extra');
+/**
+ * TimescaleDB/PostgreSQL Database Module
+ * Direct replacement of SQLite implementation
+ */
+const { Pool } = require('pg');
 const config = require('./config');
 
-// データベースファイルのパス
-const DB_PATH = process.env.DB_PATH || path.join(config.dataSource.staticDataPath, '../db/if_hub.db');
+console.log('Initializing TimescaleDB connection...');
+console.log(`  Host: ${config.database.host}`);
+console.log(`  Port: ${config.database.port}`);
+console.log(`  Database: ${config.database.database}`);
+console.log(`  User: ${config.database.user}`);
 
-// データディレクトリの確保
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// PostgreSQL connection pool
+const pool = new Pool({
+  host: config.database.host,
+  port: config.database.port,
+  database: config.database.database,
+  user: config.database.user,
+  password: config.database.password,
+  max: 20,                        // Max connection pool size
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+// Error handling
+pool.on('error', (err) => {
+  console.error('Unexpected database pool error:', err);
+});
+
+// Connection success handling
+pool.on('connect', () => {
+  console.log('New database connection established');
+});
+
+// Test connection on startup
+(async () => {
+  try {
+    const result = await pool.query('SELECT version() as version, current_database() as db');
+    console.log('✓ TimescaleDB connection successful');
+    console.log(`  PostgreSQL: ${result.rows[0].version.split(',')[0]}`);
+    console.log(`  Current database: ${result.rows[0].db}`);
+
+    // Check TimescaleDB extension
+    const tsdbCheck = await pool.query(`
+      SELECT extname, extversion
+      FROM pg_extension
+      WHERE extname = 'timescaledb'
+    `);
+    if (tsdbCheck.rows.length > 0) {
+      console.log(`✓ TimescaleDB extension: v${tsdbCheck.rows[0].extversion}`);
+    } else {
+      console.warn('⚠ TimescaleDB extension not found');
+    }
+  } catch (error) {
+    console.error('✗ TimescaleDB connection failed:', error.message);
+    console.error('  Please ensure TimescaleDB is running and credentials are correct');
+  }
+})();
+
+/**
+ * Helper: Execute query and return all rows
+ * @param {string} sql - SQL query
+ * @param {Array} params - Query parameters
+ * @returns {Promise<Array>} - Array of result rows
+ */
+async function query(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows;
 }
 
-console.log(`データベースファイル: ${DB_PATH}`);
-
-// データベース接続の初期化
-const db = sqlite3(DB_PATH);
-
-// SQLite最適化設定
-db.pragma('journal_mode = WAL');
-db.pragma('cache_size = -64000');
-db.pragma('mmap_size = 268435456');
-
-console.log('SQLite最適化設定を適用しました:');
-console.log(`  - journal_mode: ${db.pragma('journal_mode', { simple: true })}`);
-console.log(`  - cache_size: ${db.pragma('cache_size', { simple: true })} pages`);
-console.log(`  - mmap_size: ${db.pragma('mmap_size', { simple: true })} bytes`);
-
-// テーブルの作成
-function initDatabase() {
-  // タグメタデータテーブル（equipment列を削除）
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      source_tag TEXT NOT NULL,
-      unit TEXT,
-      min REAL,
-      max REAL
-    )
-  `);
-  
-  // 時系列データテーブル
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tag_data (
-      tag_id INTEGER NOT NULL,
-      timestamp TEXT NOT NULL,
-      value REAL,
-      PRIMARY KEY (tag_id, timestamp),
-      FOREIGN KEY (tag_id) REFERENCES tags(id)
-    )
-  `);
-  
-  // タグ表示名テーブル
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tag_translations (
-      tag_id INTEGER NOT NULL,
-      language TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      unit TEXT,
-      PRIMARY KEY (tag_id, language),
-      FOREIGN KEY (tag_id) REFERENCES tags(id)
-    )
-  `);
-  
-  // 設備とタグの関連付けテーブル（多対多関係）
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS equipment_tags (
-      equipment_name TEXT NOT NULL,
-      tag_name TEXT NOT NULL,
-      tag_type TEXT NOT NULL CHECK (tag_type IN ('source', 'gtag')),
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (equipment_name, tag_name, tag_type)
-    )
-  `);
-
-  // インデックス作成（検索高速化のため）
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_data_timestamp ON tag_data(timestamp)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_source_tag ON tags(source_tag)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tag_translations_tag_id ON tag_translations(tag_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_tags_equipment ON equipment_tags(equipment_name)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_tags_tag ON equipment_tags(tag_name)`);
-
-  console.log('データベーステーブルの初期化が完了しました');
+/**
+ * Helper: Execute query and return first row
+ * @param {string} sql - SQL query
+ * @param {Array} params - Query parameters
+ * @returns {Promise<Object|null>} - First result row or null
+ */
+async function get(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows[0] || null;
 }
 
-// データベースを初期化
-initDatabase();
+/**
+ * Helper: Execute statement (INSERT/UPDATE/DELETE)
+ * @param {string} sql - SQL statement
+ * @param {Array} params - Statement parameters
+ * @returns {Promise<Object>} - Result with rowCount and rows
+ */
+async function run(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return {
+    rowCount: result.rowCount,
+    rows: result.rows,
+    // Compatibility with SQLite's lastID (returns first row's id if available)
+    lastID: result.rows[0]?.id || null
+  };
+}
 
-module.exports = { db };
+/**
+ * Helper: Transaction wrapper
+ * @param {Function} callback - Async function to execute within transaction
+ * @returns {Promise<*>} - Result from callback
+ */
+async function transaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Helper: Prepare statement
+ * Provides compatibility layer for SQLite-style prepared statements
+ * Converts ? placeholders to PostgreSQL $1, $2, ... style
+ * @param {string} sql - SQL query with ? placeholders
+ * @returns {Object} - Prepared statement object with get/all/run methods
+ */
+function prepare(sql) {
+  // Convert SQLite-style ? to PostgreSQL-style $1, $2, ...
+  let paramIndex = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++paramIndex}`);
+
+  return {
+    get: async (...params) => get(pgSql, params),
+    all: async (...params) => query(pgSql, params),
+    run: async (...params) => run(pgSql, params)
+  };
+}
+
+/**
+ * Health check
+ * @returns {Promise<boolean>} - True if connection is healthy
+ */
+async function healthCheck() {
+  try {
+    const result = await pool.query('SELECT 1 as ok');
+    return result.rows[0].ok === 1;
+  } catch (error) {
+    console.error('Health check failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Graceful shutdown
+ * @returns {Promise<void>}
+ */
+async function close() {
+  await pool.end();
+  console.log('Database connection pool closed');
+}
+
+/**
+ * Database initialization
+ * Note: Schema is primarily initialized via Docker init-scripts/init-timescaledb.sql
+ * This function ensures tables exist (useful for non-Docker environments)
+ */
+async function initDatabase() {
+  try {
+    // Check if tables exist
+    const tableCheck = await pool.query(`
+      SELECT COUNT(*) as count
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('tags', 'tag_data', 'tag_translations', 'equipment_tags', 'gtags')
+    `);
+
+    const tableCount = parseInt(tableCheck.rows[0].count);
+    if (tableCount === 5) {
+      console.log('✓ All database tables verified');
+
+      // Verify hypertable
+      const hypertableCheck = await pool.query(`
+        SELECT hypertable_name, num_chunks, compression_enabled
+        FROM timescaledb_information.hypertables
+        WHERE hypertable_name = 'tag_data'
+      `);
+
+      if (hypertableCheck.rows.length > 0) {
+        const ht = hypertableCheck.rows[0];
+        console.log(`✓ Hypertable 'tag_data' active (${ht.num_chunks} chunks, compression: ${ht.compression_enabled})`);
+      }
+    } else {
+      console.warn(`⚠ Expected 5 tables, found ${tableCount}. Please run init-timescaledb.sql`);
+    }
+  } catch (error) {
+    console.error('Database initialization check failed:', error.message);
+  }
+}
+
+// Initialize database on module load
+initDatabase().catch(err => {
+  console.error('Failed to initialize database:', err);
+});
+
+// Export both pool and compatibility wrapper
+module.exports = {
+  pool,           // Export pool for advanced usage
+  db: {           // SQLite compatibility wrapper
+    prepare,      // Prepared statement helper (async)
+    exec: async (sql) => {
+      await pool.query(sql);
+    },
+  },
+  // New async API
+  query,          // Execute query, return all rows
+  get,            // Execute query, return first row
+  run,            // Execute statement (INSERT/UPDATE/DELETE)
+  transaction,    // Transaction wrapper
+  prepare,        // Prepared statement helper
+  healthCheck,
+  close
+};

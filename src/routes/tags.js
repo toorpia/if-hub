@@ -1,7 +1,7 @@
 // src/routes/tags.js
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { query } = require('../db');
 const { getTagMetadata, getTagsMetadata } = require('../utils/tag-utils');
 const equipmentConfigManager = require('../services/equipment-config-manager');
 const { sortTagsByConfigOrder, sortTagsByMultipleEquipmentOrder } = require('../utils/config-order-sort');
@@ -9,17 +9,17 @@ const { sortTagsByConfigOrder, sortTagsByMultipleEquipmentOrder } = require('../
 // ===== タグ関連API =====
 
 // ソースタグ名によるタグの検索
-router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
+router.get('/api/tags/sourceTag/:sourceTag', async (req, res) => {
   const { sourceTag } = req.params;
   const { equipment, display = 'false', lang = 'ja', showUnit = 'false' } = req.query;
   
   try {
     // 設定ファイルの変更チェック・自動リロード
     equipmentConfigManager.checkAndReloadIfNeeded();
-    
+
     // 全タグを取得
-    const allTags = db.prepare('SELECT * FROM tags WHERE source_tag = ?').all(sourceTag);
-    
+    const allTags = await query('SELECT * FROM tags WHERE source_tag = $1', [sourceTag]);
+
     // 設備フィルタリング（config.yamlベース）
     let filteredTags = allTags;
     if (equipment) {
@@ -61,7 +61,7 @@ router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
     // 表示名を追加
     if (display === 'true') {
       const tagNames = tagsWithEquipments.map(tag => tag.name);
-      const metadataMap = getTagsMetadata(tagNames, {
+      const metadataMap = await getTagsMetadata(tagNames, {
         display: true,
         lang,
         showUnit: showUnit === 'true'
@@ -90,20 +90,20 @@ router.get('/api/tags/sourceTag/:sourceTag', (req, res) => {
 });
 
 // 利用可能なタグ一覧
-router.get('/api/tags', (req, res) => {
+router.get('/api/tags', async (req, res) => {
   const { display = 'false', lang = 'ja', showUnit = 'false', equipment, includeGtags = 'true' } = req.query;
-  
+
   try {
     // 設定ファイルの変更チェック・自動リロード
     equipmentConfigManager.checkAndReloadIfNeeded();
-    
+
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
     const shouldIncludeGtags = includeGtags === 'true';
-    
+
     // 全タグを取得
-    const allSourceTags = db.prepare('SELECT * FROM tags').all();
-    const allGtags = shouldIncludeGtags ? db.prepare('SELECT * FROM gtags').all() : [];
+    const allSourceTags = await query('SELECT * FROM tags');
+    const allGtags = shouldIncludeGtags ? await query('SELECT * FROM gtags') : [];
     
     // 設備フィルタリング
     let filteredSourceTags = allSourceTags;
@@ -175,10 +175,10 @@ router.get('/api/tags', (req, res) => {
     // 表示名処理
     if (shouldDisplay) {
       const tagNames = tagsWithEquipments.map(tag => tag.name);
-      const metadataMap = getTagsMetadata(tagNames, { 
-        display: true, 
-        lang, 
-        showUnit: shouldShowUnit 
+      const metadataMap = await getTagsMetadata(tagNames, {
+        display: true,
+        lang,
+        showUnit: shouldShowUnit
       });
       
       // 通常タグに表示名を追加
@@ -213,12 +213,12 @@ router.get('/api/tags', (req, res) => {
 // ===== gtag関連API =====
 
 // gtag一覧取得
-router.get('/api/gtags', (req, res) => {
+router.get('/api/gtags', async (req, res) => {
   try {
     // 設定ファイルの変更チェック・自動リロード
     equipmentConfigManager.checkAndReloadIfNeeded();
-    
-    const gtags = db.prepare('SELECT * FROM gtags').all();
+
+    const gtags = await query('SELECT * FROM gtags');
     
     const formattedGtags = gtags.map(gtag => {
       const definition = JSON.parse(gtag.definition);

@@ -16,7 +16,7 @@ async function startServer() {
     const server = app.listen(PORT, () => {
       console.log(`IF-HUB Server running on port ${PORT}`);
       console.log(`Environment: ${config.environment}`);
-      console.log(`Storage: SQLite database`);
+      console.log(`Storage: TimescaleDB (PostgreSQL)`);
       console.log(`Available endpoints:`);
       console.log(`  GET /api/system/info`);
       console.log(`  GET /api/tags`);
