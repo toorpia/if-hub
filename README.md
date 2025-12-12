@@ -157,8 +157,8 @@ git clone https://github.com/toorpia/if-hub.git
 cd if-hub
 
 # 環境変数の設定（オプション）
-cp docker/.env.example docker/.env
-# 必要に応じて .env ファイルを編集
+cp env.timescaledb.example env.timescaledb
+# 必要に応じて env.timescaledb ファイルを編集
 
 # Docker Composeで起動（TimescaleDB + IF-Hub）
 cd docker

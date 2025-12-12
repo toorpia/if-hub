@@ -73,13 +73,8 @@ npm run generate-data
 ### Docker環境での起動
 
 ```bash
-# Docker Composeでの起動（開発環境）
-cd docker
-docker-compose up -d
-
-# Docker Composeでの起動（本番環境）
-cd docker
-docker-compose -f docker-compose.prod.yml up -d
+# Docker Composeでの起動（TimescaleDB版）
+docker compose -f docker/docker-compose.timescaledb.yml up -d
 ```
 
 ### 環境変数の設定

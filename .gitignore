@@ -50,6 +50,7 @@ temp/
 .env.local
 .env.development
 .env.production
+env.timescaledb
 
 # IDE specific files
 .idea/

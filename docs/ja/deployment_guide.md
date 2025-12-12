@@ -262,7 +262,7 @@ command:
 
 ### 5. ポート設定（複数インスタンス運用時）⚠️ 必須
 
-**修正ファイル**: `docker/.env`
+**修正ファイル**: `env.timescaledb`
 
 **インスタンス1（1分サンプリング）:**
 ```bash
@@ -344,8 +344,8 @@ SELECT create_hypertable('tag_data', 'timestamp',
 #### 4-1. 環境変数の設定
 
 ```bash
-cp docker/env.timescaledb.example docker/.env
-vi docker/.env
+cp env.timescaledb.example env.timescaledb
+vi env.timescaledb
 ```
 
 変更内容：
@@ -609,8 +609,8 @@ WHERE timestamp > NOW() - INTERVAL '7 days'
 - [ ] `docker/init-scripts/init-timescaledb.sql`の`chunk_time_interval`を変更した
 - [ ] 圧縮ポリシーを設定した（オプション）
 - [ ] 保持ポリシーを設定した（オプション）
-- [ ] `docker/.env`の`EXTERNAL_PORT`を設定した（複数インスタンスの場合）
-- [ ] `docker/.env`の`TIMESCALE_PASSWORD`を設定した
+- [ ] `env.timescaledb`の`EXTERNAL_PORT`を設定した（複数インスタンスの場合）
+- [ ] `env.timescaledb`の`TIMESCALE_PASSWORD`を設定した
 - [ ] メモリ設定を調整した（高頻度サンプリングの場合）
 - [ ] PostgreSQLポートの公開設定を確認した
 - [ ] デプロイ後の動作確認手順を確認した

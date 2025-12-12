@@ -4,30 +4,34 @@
 
 ## Docker構成ファイル
 
-- `docker-compose.yml` - 開発環境用のDocker Compose設定
-- `docker-compose.prod.yml` - 本番環境用のDocker Compose設定
-- `Dockerfile` - IF-HUBコンテナのビルド定義
+- `docker/docker-compose.timescaledb.yml` - TimescaleDB統合版のDocker Compose設定
+- `docker/Dockerfile` - IF-HUBコンテナのビルド定義
+- `docker/init-scripts/` - TimescaleDB初期化スクリプト
 
 ## コンテナ構成
 
 コンテナは以下の構成要素を含みます：
 
 - Node.js 18ベースのアプリケーション
-- SQLiteデータベース（ボリュームマウントで永続化）
+- TimescaleDB（PostgreSQL拡張）データベース
 - ホストとコンテナ間で共有されるCSVデータディレクトリ
 - ホストとコンテナ間で共有されるログディレクトリ
 
 ## クイックスタート
 
 ```bash
+# 環境変数の設定
+cp env.timescaledb.example env.timescaledb
+# 必要に応じて env.timescaledb を編集
+
 # コンテナをビルドして起動
-docker-compose up -d
+docker compose -f docker/docker-compose.timescaledb.yml up -d
 
 # ログを確認
-docker-compose logs
+docker compose -f docker/docker-compose.timescaledb.yml logs -f
 
 # コンテナを停止
-docker-compose down
+docker compose -f docker/docker-compose.timescaledb.yml down
 ```
 
 ## ボリュームマウント

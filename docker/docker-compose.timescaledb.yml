@@ -1,10 +1,15 @@
 version: '3.8'
 
+# Environment variables are loaded from ../env.timescaledb
+# Copy env.timescaledb.example to env.timescaledb and configure your settings
+
 services:
   # TimescaleDB Database Service
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     container_name: if-hub-timescaledb
+    env_file:
+      - ../env.timescaledb
     environment:
       POSTGRES_DB: if_hub
       POSTGRES_USER: if_hub_user
@@ -70,8 +75,10 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: if-hub-timescaledb-app
+    env_file:
+      - ../env.timescaledb
     ports:
-      # IF-HUB API port - Change EXTERNAL_PORT in .env for multi-instance deployment (e.g., 3002, 3003)
+      # IF-HUB API port - Change EXTERNAL_PORT in env.timescaledb for multi-instance deployment (e.g., 3002, 3003)
       - "${EXTERNAL_PORT:-3001}:3000"
     volumes:
       - ../src:/app/src
@@ -106,6 +113,8 @@ services:
       context: ../ingester
       dockerfile: Dockerfile
     container_name: if-hub-pi-ingester-timescaledb
+    env_file:
+      - ../env.timescaledb
     volumes:
       - ../configs:/app/configs:ro
       - ../logs:/app/logs
