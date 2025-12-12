@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 # タイムゾーンパッケージ、Pythonとデータ分析パッケージをインストール（apkパッケージを使用）
 RUN apk add --no-cache tzdata python3 \
