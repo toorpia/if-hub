@@ -334,12 +334,12 @@ basemap:
 
 3. **Dockerマウント確認**
    ```bash
-   docker exec -it if-hub ls -la /app/configs/equipments/
+   docker compose -f docker/docker-compose.timescaledb.yml exec if-hub ls -la /app/configs/equipments/
    ```
 
 4. **サーバーログ確認**
    ```bash
-   docker logs if-hub | grep -i "loaded config"
+   docker compose -f docker/docker-compose.timescaledb.yml logs if-hub | grep -i "loaded config"
    ```
 
 #### フィルタリングが動作しない場合
@@ -904,14 +904,14 @@ docker inspect if-hub-pi-ingester
 
 ```bash
 # データベースのバックアップ（TimescaleDB in Docker）
-docker exec -t if-hub-timescaledb pg_dump -U if_hub_user -d if_hub -F c > backup_$(date +%Y%m%d).dump
+docker compose -f docker/docker-compose.timescaledb.yml exec -T timescaledb pg_dump -U if_hub_user -d if_hub -F c > backup_$(date +%Y%m%d).dump
 
 # バックアップからの復元
-cat backup_20230101.dump | docker exec -i if-hub-timescaledb pg_restore -U if_hub_user -d if_hub -c
+cat backup_20230101.dump | docker compose -f docker/docker-compose.timescaledb.yml exec -T timescaledb pg_restore -U if_hub_user -d if_hub -c
 
 # または、pg_dumpをSQL形式で出力する場合
-docker exec -t if-hub-timescaledb pg_dump -U if_hub_user -d if_hub > backup_$(date +%Y%m%d).sql
-cat backup_20230101.sql | docker exec -i if-hub-timescaledb psql -U if_hub_user -d if_hub
+docker compose -f docker/docker-compose.timescaledb.yml exec -T timescaledb pg_dump -U if_hub_user -d if_hub > backup_$(date +%Y%m%d).sql
+cat backup_20230101.sql | docker compose -f docker/docker-compose.timescaledb.yml exec -T timescaledb psql -U if_hub_user -d if_hub
 ```
 
 #### 設定ファイルのバックアップ
@@ -949,8 +949,8 @@ cat backup_20230101.sql | docker exec -i if-hub-timescaledb psql -U if_hub_user 
    # TimescaleDBコンテナの状態確認
    docker ps | grep timescaledb
 
-   # データベース接続テスト（Docker経由）
-   docker exec if-hub-timescaledb psql -U if_hub_user -d if_hub -c "SELECT 1;"
+   # データベース接続テスト（Docker Compose経由）
+   docker compose -f docker/docker-compose.timescaledb.yml exec timescaledb psql -U if_hub_user -d if_hub -c "SELECT 1;"
    ```
 3. APIエンドポイントで正しいタグIDを指定しているか確認
    ```bash
@@ -985,10 +985,10 @@ cat backup_20230101.sql | docker exec -i if-hub-timescaledb psql -U if_hub_user 
 2. **設備フィルタリングが動作しない場合**
    ```bash
    # サーバー再起動の実行
-   docker compose restart
-   
+   docker compose -f docker/docker-compose.timescaledb.yml restart
+
    # EquipmentConfigManagerのログ確認
-   docker logs if-hub | grep -i "loaded config"
+   docker compose -f docker/docker-compose.timescaledb.yml logs if-hub | grep -i "loaded config"
    ```
 
 3. **gtagが表示されない場合**

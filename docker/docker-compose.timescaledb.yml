@@ -7,7 +7,6 @@ services:
   # TimescaleDB Database Service
   timescaledb:
     image: timescale/timescaledb:latest-pg16
-    container_name: if-hub-timescaledb
     env_file:
       - ../env.timescaledb
     environment:
@@ -74,7 +73,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: if-hub-timescaledb-app
     env_file:
       - ../env.timescaledb
     ports:
@@ -112,7 +110,6 @@ services:
     build:
       context: ../ingester
       dockerfile: Dockerfile
-    container_name: if-hub-pi-ingester-timescaledb
     env_file:
       - ../env.timescaledb
     volumes:
