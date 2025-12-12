@@ -136,7 +136,7 @@ GET /api/system/info
   "tagCount": 48,
   "equipmentCount": 3,
   "environment": "development",
-  "storage": "SQLite database"
+  "storage": "TimescaleDB (PostgreSQL)"
 }
 ```
 
@@ -156,7 +156,7 @@ GET /api/status
   "timestamp": "2023-01-01T12:00:00.000Z",
   "environment": "development",
   "database": {
-    "type": "SQLite",
+    "type": "TimescaleDB",
     "tags": 48,
     "equipment": 3,
     "dataPoints": 12480
@@ -928,56 +928,61 @@ IF-HUBは、サーバーの実行中にタグメタデータファイルが更�
 
 ### データベース設計
 
-IF-HUBは、効率的なデータ管理のために最適化されたデータベース設計を採用しています：
+IF-HUBは、TimescaleDB（PostgreSQLの拡張）を使用して時系列データを効率的に管理しています：
 
 #### tags テーブル
 ```sql
-CREATE TABLE IF NOT EXISTS tags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE tags (
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   source_tag TEXT NOT NULL,
   unit TEXT,
-  min REAL,
-  max REAL
-)
+  min DOUBLE PRECISION,
+  max DOUBLE PRECISION
+);
 ```
 
-#### tag_data テーブル
+#### tag_data テーブル（Hypertable）
 ```sql
-CREATE TABLE IF NOT EXISTS tag_data (
+CREATE TABLE tag_data (
   tag_id INTEGER NOT NULL,
-  timestamp TEXT NOT NULL,
-  value REAL,
-  PRIMARY KEY (tag_id, timestamp),
-  FOREIGN KEY (tag_id) REFERENCES tags(id)
-)
+  timestamp TIMESTAMPTZ NOT NULL,
+  value DOUBLE PRECISION,
+  PRIMARY KEY (tag_id, timestamp)
+);
+
+-- Convert to hypertable (30-day chunks)
+SELECT create_hypertable('tag_data', 'timestamp',
+  chunk_time_interval => INTERVAL '30 days',
+  if_not_exists => TRUE
+);
 ```
 
 #### tag_translations テーブル
 ```sql
-CREATE TABLE IF NOT EXISTS tag_translations (
+CREATE TABLE tag_translations (
   tag_id INTEGER NOT NULL,
   language TEXT NOT NULL,
   display_name TEXT NOT NULL,
   unit TEXT,
   PRIMARY KEY (tag_id, language),
-  FOREIGN KEY (tag_id) REFERENCES tags(id)
-)
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
 ```
 
 #### gtags テーブル
 ```sql
-CREATE TABLE IF NOT EXISTS gtags (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE gtags (
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   equipment TEXT NOT NULL,
   description TEXT,
   unit TEXT,
   type TEXT NOT NULL,
   definition TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ### タグID参照の仕組み

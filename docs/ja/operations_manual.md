@@ -27,7 +27,7 @@ IndustryFlow Hub（IF-HUB）は、製造設備の時系列データを安全に�
 IF-HUBは以下のコンポーネントで構成されています：
 
 - Node.js/Express APIサーバー
-- SQLiteデータベース
+- TimescaleDBデータベース（PostgreSQL + TimescaleDB拡張）
 - CSVデータインポーター
 - タグ表示名マッピング
 - 計算生成タグ（gtag）フレームワーク
@@ -105,7 +105,7 @@ IF-HUBは以下の環境変数をサポートしています：
 ```
 IndustryFlow Hub (IF-HUB) Server running on port 3000
 Environment: development
-Storage: SQLite database
+Storage: TimescaleDB (PostgreSQL)
 ```
 
 http://localhost:3001/api/status にアクセスして、サーバーのステータスを確認できます。
@@ -908,11 +908,15 @@ docker inspect if-hub-pi-ingester
 #### データベースのバックアップ
 
 ```bash
-# データベースのバックアップ
-sqlite3 db/if_hub.db .dump > backup_$(date +%Y%m%d).sql
+# データベースのバックアップ（TimescaleDB in Docker）
+docker exec -t if-hub-timescaledb pg_dump -U if_hub_user -d if_hub -F c > backup_$(date +%Y%m%d).dump
 
 # バックアップからの復元
-sqlite3 db/if_hub.db < backup_20230101.sql
+cat backup_20230101.dump | docker exec -i if-hub-timescaledb pg_restore -U if_hub_user -d if_hub -c
+
+# または、pg_dumpをSQL形式で出力する場合
+docker exec -t if-hub-timescaledb pg_dump -U if_hub_user -d if_hub > backup_$(date +%Y%m%d).sql
+cat backup_20230101.sql | docker exec -i if-hub-timescaledb psql -U if_hub_user -d if_hub
 ```
 
 #### 設定ファイルのバックアップ
@@ -945,9 +949,13 @@ sqlite3 db/if_hub.db < backup_20230101.sql
 #### データが表示されない場合
 
 1. CSVファイルが正しい形式であるか確認
-2. データベースファイルが存在するか確認
+2. データベースが接続可能か確認
    ```bash
-   ls -la db/
+   # TimescaleDBコンテナの状態確認
+   docker ps | grep timescaledb
+
+   # データベース接続テスト（Docker経由）
+   docker exec if-hub-timescaledb psql -U if_hub_user -d if_hub -c "SELECT 1;"
    ```
 3. APIエンドポイントで正しいタグIDを指定しているか確認
    ```bash
