@@ -25,50 +25,58 @@ async function initializeEquipmentData() {
       return;
     }
     
-    // equipment_tags テーブルにデータを投入
-    const insertEquipmentTag = db.prepare(`
-      INSERT OR REPLACE INTO equipment_tags (equipment_name, tag_name, tag_type)
-      VALUES (?, ?, ?)
-    `);
-    
     // 統計情報
     let totalSourceTags = 0;
     let totalGtags = 0;
-    
+
     // トランザクションで一括処理
-    const transaction = db.transaction((equipments) => {
+    await db.query('BEGIN');
+    try {
       // 既存データをクリア
-      db.prepare('DELETE FROM equipment_tags').run();
+      await db.query('DELETE FROM equipment_tags');
       console.log('既存のequipment_tagsデータをクリアしました');
-      
-      equipments.forEach(equipmentName => {
+
+      for (const equipmentName of equipments) {
         console.log(`\n${equipmentName} の処理中...`);
-        
+
         try {
           // source_tags を登録
           const sourceTags = configManager.getTagsForEquipment(equipmentName, 'source');
           console.log(`  source_tags: ${sourceTags.length}個`);
-          sourceTags.forEach(tagName => {
-            insertEquipmentTag.run(equipmentName, tagName, 'source');
-          });
+          for (const tagName of sourceTags) {
+            await db.query(
+              `INSERT INTO equipment_tags (equipment_name, tag_name, tag_type)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (equipment_name, tag_name, tag_type) DO NOTHING`,
+              [equipmentName, tagName, 'source']
+            );
+          }
           totalSourceTags += sourceTags.length;
-          
+
           // gtags を登録
           const gtags = configManager.getTagsForEquipment(equipmentName, 'gtag');
           console.log(`  gtags: ${gtags.length}個`);
-          gtags.forEach(tagName => {
-            insertEquipmentTag.run(equipmentName, tagName, 'gtag');
-          });
+          for (const tagName of gtags) {
+            await db.query(
+              `INSERT INTO equipment_tags (equipment_name, tag_name, tag_type)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (equipment_name, tag_name, tag_type) DO NOTHING`,
+              [equipmentName, tagName, 'gtag']
+            );
+          }
           totalGtags += gtags.length;
-          
+
         } catch (error) {
           console.error(`  エラー: ${error.message}`);
+          throw error;
         }
-      });
-    });
-    
-    // トランザクションを実行
-    transaction(equipments);
+      }
+
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
     
     console.log('\n=== 初期化完了 ===');
     console.log(`設備数: ${equipments.length}`);
@@ -78,17 +86,17 @@ async function initializeEquipmentData() {
     
     // データベースの状態を確認
     console.log('\n=== データベース確認 ===');
-    const counts = db.prepare(`
-      SELECT 
+    const result = await db.query(`
+      SELECT
         equipment_name,
         COUNT(CASE WHEN tag_type = 'source' THEN 1 END) as source_count,
         COUNT(CASE WHEN tag_type = 'gtag' THEN 1 END) as gtag_count
       FROM equipment_tags
       GROUP BY equipment_name
       ORDER BY equipment_name
-    `).all();
-    
-    counts.forEach(row => {
+    `);
+
+    result.rows.forEach(row => {
       console.log(`${row.equipment_name}: source=${row.source_count}, gtag=${row.gtag_count}`);
     });
     
@@ -102,41 +110,45 @@ async function initializeEquipmentData() {
  * 特定の設備のタグ関連付けを更新
  * @param {string} equipmentName - 設備名
  */
-function updateEquipmentTags(equipmentName) {
+async function updateEquipmentTags(equipmentName) {
   console.log(`${equipmentName} のタグ関連付けを更新中...`);
-  
+
   const configManager = new EquipmentConfigManager();
-  
+
   try {
+    await db.query('BEGIN');
+
     // 該当設備の既存データを削除
-    const deleteStmt = db.prepare('DELETE FROM equipment_tags WHERE equipment_name = ?');
-    deleteStmt.run(equipmentName);
-    
-    // 新しいデータを挿入
-    const insertStmt = db.prepare(`
-      INSERT INTO equipment_tags (equipment_name, tag_name, tag_type)
-      VALUES (?, ?, ?)
-    `);
-    
-    const transaction = db.transaction(() => {
-      // source_tagsを追加
-      const sourceTags = configManager.getTagsForEquipment(equipmentName, 'source');
-      sourceTags.forEach(tagName => {
-        insertStmt.run(equipmentName, tagName, 'source');
-      });
-      
-      // gtagsを追加
-      const gtags = configManager.getTagsForEquipment(equipmentName, 'gtag');
-      gtags.forEach(tagName => {
-        insertStmt.run(equipmentName, tagName, 'gtag');
-      });
-      
-      console.log(`${equipmentName}: source=${sourceTags.length}, gtag=${gtags.length}`);
-    });
-    
-    transaction();
-    
+    await db.query('DELETE FROM equipment_tags WHERE equipment_name = $1', [equipmentName]);
+
+    // source_tagsを追加
+    const sourceTags = configManager.getTagsForEquipment(equipmentName, 'source');
+    for (const tagName of sourceTags) {
+      await db.query(
+        `INSERT INTO equipment_tags (equipment_name, tag_name, tag_type)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (equipment_name, tag_name, tag_type) DO NOTHING`,
+        [equipmentName, tagName, 'source']
+      );
+    }
+
+    // gtagsを追加
+    const gtags = configManager.getTagsForEquipment(equipmentName, 'gtag');
+    for (const tagName of gtags) {
+      await db.query(
+        `INSERT INTO equipment_tags (equipment_name, tag_name, tag_type)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (equipment_name, tag_name, tag_type) DO NOTHING`,
+        [equipmentName, tagName, 'gtag']
+      );
+    }
+
+    await db.query('COMMIT');
+
+    console.log(`${equipmentName}: source=${sourceTags.length}, gtag=${gtags.length}`);
+
   } catch (error) {
+    await db.query('ROLLBACK');
     console.error(`${equipmentName} のタグ更新中にエラーが発生しました:`, error);
     throw error;
   }
