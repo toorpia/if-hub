@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 const moment = require('moment');
+const pLimit = require('p-limit');
 const { pool, transaction } = require('../db');
 const config = require('../config');
 const { applyMetadataToTag } = require('./tag-metadata-importer');
@@ -93,15 +94,14 @@ async function importCsvToDatabase(fileInfo) {
     console.log(`  タイムスタンプ列: ${timestampColumn}`);
     console.log(`  検出されたタグ: ${tagHeaders.join(', ')}`);
 
-    // メインのインポート処理をトランザクションで実行
-    const result = await transaction(async (client) => {
-      let tagCount = 0;
-      let dataPointCount = 0;
+    // 並列処理の同時実行数を制限（接続プールを守るため）
+    const limit = pLimit(5); // 最大5タグを並列処理（接続プール枯渇を防ぐ）
 
-      // タグごとに処理（CSVの再読み込みなし）
-      for (const header of tagHeaders) {
+    // タグ処理関数を定義
+    const processTag = async (header, index, total) => {
+      return transaction(async (client) => {
         const tagId = header; // 設備名を含まない形式に変更
-        console.log(`  タグ ${tagId} を処理中...`);
+        console.log(`  [${index + 1}/${total}] タグ ${tagId} を処理中...`);
 
         // メモリ内のデータからタグ値を抽出
         const tagValues = rows
@@ -109,8 +109,8 @@ async function importCsvToDatabase(fileInfo) {
           .filter(val => !isNaN(val));
 
         if (tagValues.length === 0) {
-          console.log(`    有効な数値データがありません。スキップします。`);
-          continue;
+          console.log(`    [${tagId}] 有効な数値データがありません。スキップします。`);
+          return { tagCount: 0, dataPointCount: 0 };
         }
 
         // 最小値と最大値を計算
@@ -131,12 +131,10 @@ async function importCsvToDatabase(fileInfo) {
         `, [tagId, header, guessUnit(header), min, max]);
 
         const tagIdInt = upsertTagResult.rows[0].id;
-        console.log(`    タグID: ${tagIdInt}`);
+        console.log(`    [${tagId}] タグID: ${tagIdInt}`);
 
         // タグにメタデータを適用
         await applyMetadataToTag(tagIdInt, header);
-
-        tagCount++;
 
         // データポイントを作成（メモリ内データから）
         const dataPoints = [];
@@ -156,7 +154,7 @@ async function importCsvToDatabase(fileInfo) {
 
               // デバッグ用ログ（最初の数件のみ）
               if (dataPoints.length < 2) {
-                console.log(`    [DEBUG] 日時変換: ${row[timestampColumn]} -> ${timestamp}, 値: ${value}`);
+                console.log(`    [${tagId}] [DEBUG] 日時変換: ${row[timestampColumn]} -> ${timestamp}, 値: ${value}`);
               }
 
               dataPoints.push({
@@ -164,7 +162,7 @@ async function importCsvToDatabase(fileInfo) {
                 value
               });
             } catch (err) {
-              console.warn(`    日時の解析に失敗しました: ${row[timestampColumn]}`);
+              console.warn(`    [${tagId}] 日時の解析に失敗しました: ${row[timestampColumn]}`);
             }
           }
         }
@@ -197,12 +195,39 @@ async function importCsvToDatabase(fileInfo) {
           }
         }
 
-        dataPointCount += dataPoints.length;
-        console.log(`    ${dataPoints.length} データポイントを挿入しました`);
-      }
+        console.log(`    [${tagId}] ${dataPoints.length} データポイントを挿入しました`);
+        return { tagCount: 1, dataPointCount: dataPoints.length };
+      });
+    };
 
-      return { tagCount, dataPointCount };
+    // 並列でタグを処理
+    console.log(`  ${tagHeaders.length} タグを並列処理開始（最大10並列）...`);
+    const results = await Promise.allSettled(
+      tagHeaders.map((header, index) =>
+        limit(() => processTag(header, index, tagHeaders.length))
+      )
+    );
+
+    // 結果を集計
+    let tagCount = 0;
+    let dataPointCount = 0;
+    let failedCount = 0;
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        tagCount += result.value.tagCount;
+        dataPointCount += result.value.dataPointCount;
+      } else {
+        failedCount++;
+        console.error(`  タグ ${tagHeaders[index]} の処理に失敗しました:`, result.reason);
+      }
     });
+
+    if (failedCount > 0) {
+      console.warn(`  警告: ${failedCount} タグの処理に失敗しました`);
+    }
+
+    const result = { tagCount, dataPointCount };
 
     console.log(`  ${fileInfo.name} の処理が完了しました（合計: ${result.tagCount}タグ, ${result.dataPointCount}データポイント）`);
 
