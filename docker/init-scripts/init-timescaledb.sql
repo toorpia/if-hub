@@ -40,11 +40,21 @@ CREATE TABLE IF NOT EXISTS tag_data (
   PRIMARY KEY (tag_id, timestamp)
 );
 
--- Convert to hypertable with 30-day chunks
--- Rationale: 1-minute sampling = 1,440 rows/day/tag
---            With 100-200 tags: ~4.3M-8.6M rows/month = optimal chunk size
+-- Convert to hypertable with 30-day chunks (optimized for 1-minute sampling)
+-- ============================================================================
+-- IMPORTANT: Adjust chunk_time_interval based on your sampling rate
+--
+-- Recommended chunk sizes (target: 5-10M rows per chunk):
+--   0.1s sampling (10Hz), 200 tags: ~172M rows/day  → use '3 days'
+--   1s sampling, 100 tags:          ~8.6M rows/day  → use '7 days' or '14 days'
+--   1min sampling, 100 tags:        ~144K rows/day  → use '30 days' (default)
+--   5min+ sampling, 100 tags:       ~29K rows/day   → use '60 days' or '90 days'
+--
+-- Formula: chunk_size = target_rows / (samples_per_day × num_tags)
+-- See docs/ja/deployment_guide.md for detailed guidance
+-- ============================================================================
 SELECT create_hypertable('tag_data', 'timestamp',
-  chunk_time_interval => INTERVAL '30 days',
+  chunk_time_interval => INTERVAL '30 days',  -- Adjust for your sampling rate
   if_not_exists => TRUE
 );
 
@@ -56,15 +66,17 @@ ALTER TABLE tag_data SET (
 );
 
 -- Add compression policy (compress data older than 30 days)
+-- Adjust based on data volume: high-frequency sampling → compress earlier (e.g., 7 days)
 SELECT add_compression_policy('tag_data',
-  compress_after => INTERVAL '30 days',
+  compress_after => INTERVAL '30 days',  -- Change to '7 days' for high-frequency sampling
   if_not_exists => TRUE
 );
 
 -- Optional: Add retention policy (uncomment to enable)
--- Automatically delete data older than 1 year
+-- Automatically delete data older than specified period
+-- Recommended: 2 years for standard, 6 months for high-frequency sampling
 -- SELECT add_retention_policy('tag_data',
---   drop_after => INTERVAL '1 year',
+--   drop_after => INTERVAL '2 years',  -- Adjust based on your retention requirements
 --   if_not_exists => TRUE
 -- );
 

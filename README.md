@@ -168,6 +168,11 @@ docker compose -f docker-compose.timescaledb.yml up -d
 docker compose -f docker-compose.timescaledb.yml logs -f
 ```
 
+> **⚠️ 本番環境デプロイ前の重要な確認事項**
+>
+> 上流データソースの**サンプリングレート**によって、TimescaleDBの設定を調整する必要があります。
+> 詳細は下記の「[本番環境へのデプロイ時の考慮事項](#本番環境へのデプロイ時の考慮事項)」を必ずご確認ください。
+
 #### ネイティブ環境での起動
 
 ネイティブ環境では、PostgreSQL + TimescaleDBを事前にインストールする必要があります。
@@ -298,6 +303,7 @@ IF-HUBは以下の主要ディレクトリで構成されています：
 
 ## ドキュメント
 
+- **[本番環境デプロイガイド](docs/ja/deployment_guide.md) - サンプリングレート別の設定最適化（本番デプロイ前に必読）**
 - [運用マニュアル](docs/ja/operations_manual.md) - インストール、設定、運用の詳細
 - [APIマニュアル](docs/ja/api_manual.md) - APIエンドポイントの詳細と使用例
 - [開発者ガイド](docs/ja/developer_guide.md) - アーキテクチャ、コード詳細、拡張方法

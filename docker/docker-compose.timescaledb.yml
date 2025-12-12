@@ -11,6 +11,8 @@ services:
       POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-change_this_password}
       POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb"
     ports:
+      # PostgreSQL port - Comment out if host access is not needed (recommended for multi-instance deployment)
+      # See docs/ja/deployment_guide.md for details
       - "${TIMESCALE_PORT:-5432}:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
@@ -24,12 +26,15 @@ services:
       timeout: 5s
       retries: 5
     shm_size: 256mb
+    # PostgreSQL tuning parameters - Optimized for 1-minute sampling rate (standard)
+    # For high-frequency sampling (<1s), increase these values
+    # See docs/ja/deployment_guide.md for tuning guidelines
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=256MB"
+      - "shared_buffers=256MB"          # Increase to 512MB for high-frequency sampling
       - "-c"
-      - "effective_cache_size=1GB"
+      - "effective_cache_size=1GB"      # Increase to 2GB for high-frequency sampling
       - "-c"
       - "maintenance_work_mem=128MB"
       - "-c"
@@ -43,19 +48,21 @@ services:
       - "-c"
       - "effective_io_concurrency=200"
       - "-c"
-      - "work_mem=8MB"
+      - "work_mem=8MB"                  # Increase to 16MB for high-frequency sampling
       - "-c"
       - "min_wal_size=1GB"
       - "-c"
-      - "max_wal_size=4GB"
+      - "max_wal_size=4GB"              # Increase to 8GB for high-frequency sampling
       - "-c"
-      - "max_worker_processes=4"
+      - "max_worker_processes=8"
       - "-c"
       - "max_parallel_workers_per_gather=2"
       - "-c"
       - "max_parallel_workers=4"
       - "-c"
       - "max_parallel_maintenance_workers=2"
+      - "-c"
+      - "timescaledb.max_background_workers=8"
 
   # IF-HUB Application Service (TimescaleDB version)
   if-hub:
@@ -64,6 +71,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: if-hub-timescaledb-app
     ports:
+      # IF-HUB API port - Change EXTERNAL_PORT in .env for multi-instance deployment (e.g., 3002, 3003)
       - "${EXTERNAL_PORT:-3001}:3000"
     volumes:
       - ../src:/app/src
@@ -72,6 +80,7 @@ services:
       - ../tag_metadata:/app/tag_metadata
       - ../gtags:/app/gtags
       - ../logs:/app/logs
+      - ../db:/app/db
       - ../package.json:/app/package.json
     environment:
       - NODE_ENV=development
