@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Environment variables are loaded from ../env.timescaledb
 # Copy env.timescaledb.example to env.timescaledb and configure your settings
 
