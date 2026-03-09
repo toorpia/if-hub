@@ -18,10 +18,10 @@
     "outputPath": "dist/bin"
   },
   "dependencies": {
-    "axios": "^1.8.2",
+    "axios": "^1.13.5",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.5",
