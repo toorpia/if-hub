@@ -88,7 +88,7 @@ export class DataIngestionScheduler {
         console.log(`\n=== Scheduled fetch for ${equipmentKey} ===`);
         await this.fetchDataForEquipment(equipmentName, equipmentConfig);
       }, {
-        scheduled: true,
+        // node-cron v4 starts the task automatically on schedule()
         timezone: 'Asia/Tokyo'
       });
 
