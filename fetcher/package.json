@@ -26,10 +26,10 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.5",
     "@types/node": "^20.8.0",
-    "@typescript-eslint/eslint-plugin": "^6.7.3",
-    "@typescript-eslint/parser": "^6.7.3",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^8.50.0",
-    "pkg": "^5.8.1",
+    "@yao-pkg/pkg": "^6.20.0",
     "typescript": "^5.2.2"
   }
 }
