@@ -8,7 +8,7 @@ const { getTimeShiftedData } = require('../utils/time-utils');
 const { calculateMovingAverage, calculateZScore, calculateDeviation } = require('../utils/data-processing');
 const config = require('../config');
 const equipmentConfigManager = require('../services/equipment-config-manager');
-const { sortTagIdsByConfigOrder } = require('../utils/config-order-sort');
+const { sortTagKeysByConfigOrder } = require('../utils/config-order-sort');
 
 // 特定タグのデータ取得
 router.get('/api/data/:tagName', async (req, res) => {
@@ -536,17 +536,21 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     }
     
     // タグ名からタグIDとgtagIDを取得
-    const normalTagIds = [];
-    const tagIdToName = new Map();
-    const gtagIds = [];
-    const gtagIdToName = new Map();
-    
+    // tagsとgtagsは別テーブルでIDがそれぞれ1から採番されるため、数値IDだけでは衝突する。
+    // そのため各列は種別付きの文字列キー（tag:<id> / gtag:<id>）で識別する
+    const normalTagKeys = [];
+    const gtagKeys = [];
+    const keyToId = new Map();
+    const keyToName = new Map();
+
     // 通常タグの処理
     for (const tagName of sourceTags) {
       const tag = await get('SELECT id, name FROM tags WHERE source_tag = $1 OR name = $1', [tagName]);
       if (tag) {
-        normalTagIds.push(tag.id);
-        tagIdToName.set(tag.id, tag.name);
+        const key = `tag:${tag.id}`;
+        normalTagKeys.push(key);
+        keyToId.set(key, tag.id);
+        keyToName.set(key, tag.name);
       }
     }
 
@@ -554,18 +558,20 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     for (const gtagName of gtags) {
       const gtag = await get('SELECT id, name FROM gtags WHERE name = $1', [gtagName]);
       if (gtag) {
-        gtagIds.push(gtag.id);
-        gtagIdToName.set(gtag.id, gtag.name);
+        const key = `gtag:${gtag.id}`;
+        gtagKeys.push(key);
+        keyToId.set(key, gtag.id);
+        keyToName.set(key, gtag.name);
       }
     }
-    
-    // 全タグIDを配列にまとめる（通常タグが先、gtagが後）
-    let allTagIds = [...normalTagIds, ...gtagIds];
-    
+
+    // 全タグキーを配列にまとめる（通常タグが先、gtagが後）
+    let allTagKeys = [...normalTagKeys, ...gtagKeys];
+
     // config.yaml順序でソート
-    allTagIds = sortTagIdsByConfigOrder(allTagIds, equipmentId, tagIdToName, gtagIdToName);
-    
-    if (allTagIds.length === 0) {
+    allTagKeys = sortTagKeysByConfigOrder(allTagKeys, equipmentId, keyToName);
+
+    if (allTagKeys.length === 0) {
       return res.status(404).json({ error: `No valid tags found for equipment ${equipmentId}` });
     }
     
@@ -573,68 +579,59 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     const shouldDisplay = display === 'true';
     const shouldShowUnit = showUnit === 'true';
     
-    // ヘッダー名を取得
-    let headerNames = [...allTagIds]; // デフォルトはタグID
-    
+    // ヘッダー名を取得（デフォルトはタグ名）
+    let headerNames = allTagKeys.map(key => keyToName.get(key));
+
     if (shouldDisplay) {
-      // タグIDから内部タグ名（7th-untan.POW:7I1032.PV形式）のリストを作成
-      const normalTagNames = normalTagIds.map(id => tagIdToName.get(id)).filter(Boolean);
-      
+      // 内部タグ名（7th-untan.POW:7I1032.PV形式）のリストを作成
+      const normalTagNames = normalTagKeys.map(key => keyToName.get(key)).filter(Boolean);
+
       // 内部タグ名からメタデータを取得（他のAPIエンドポイントと同様のアプローチ）
-      const metadataMap = getTagsMetadata(normalTagNames, {
+      const metadataMap = await getTagsMetadata(normalTagNames, {
         display: true,
         lang,
         showUnit: shouldShowUnit
       });
-      
+
       // gtag表示名の取得
       const gtagHeaderMap = {};
-      if (shouldIncludeGtags && gtagIds.length > 0) {
-        for (const gtagId of gtagIds) {
-          const gtag = await get('SELECT * FROM gtags WHERE id = $1', [gtagId]);
+      if (shouldIncludeGtags && gtagKeys.length > 0) {
+        for (const gtagKey of gtagKeys) {
+          const gtag = await get('SELECT * FROM gtags WHERE id = $1', [keyToId.get(gtagKey)]);
           let displayName = gtag.description || gtag.name;
           if (shouldShowUnit && gtag.unit) {
             displayName = `${displayName} (${gtag.unit})`;
           }
-          gtagHeaderMap[gtagId] = displayName;
+          gtagHeaderMap[gtagKey] = displayName;
         }
       }
-      
-      // ヘッダー名を表示名に置き換え
-      headerNames = allTagIds.map(tagId => {
-        if (gtagIds.includes(tagId)) {
+
+      // ヘッダー名を表示名に置き換え（取得できない場合はタグ名のまま）
+      headerNames = allTagKeys.map(key => {
+        const tagName = keyToName.get(key);
+        if (gtagKeys.includes(key)) {
           // gtagの場合
-          return gtagHeaderMap[tagId] || tagId;
+          return gtagHeaderMap[key] || tagName;
         } else {
           // 通常タグの場合
-          const tagName = tagIdToName.get(tagId);
-          return tagName ? metadataMap[tagName]?.display_name || tagId : tagId;
+          return metadataMap[tagName]?.display_name || tagName;
         }
       });
     }
-    
+
     // CSVヘッダーの生成（1列目はdatetime、2列目以降は各タグの名前）
-    // 表示名オプションがオンの場合はheaderNamesを使用、それ以外はタグ名を使用
-    const headersToUse = shouldDisplay ? headerNames : allTagIds.map(tagId => {
-      if (gtagIds.includes(tagId)) {
-        // gtagの場合
-        return gtagIdToName.get(tagId) || tagId.toString();
-      } else {
-        // 通常タグの場合
-        return tagIdToName.get(tagId) || tagId.toString();
-      }
-    });
-    
-    const csvHeader = ['datetime', ...headersToUse].join(',');
+    // 表示名オプションがオンの場合は表示名、それ以外はタグ名を使用
+    const csvHeader = ['datetime', ...headerNames].join(',');
     
     // データポイントのタイムスタンプを収集
     const timestamps = new Set();
     const tagData = {};
     
   // 各タグのデータを取得し、タイムスタンプを収集
-  for (const tagId of allTagIds) {
+  for (const tagKey of allTagKeys) {
+    const tagId = keyToId.get(tagKey);
     // gtagかどうかチェック
-    const isGtag = gtagIds.includes(tagId);
+    const isGtag = gtagKeys.includes(tagKey);
 
     let data;
     if (isGtag) {
@@ -644,7 +641,7 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       
       // 修正2: gtagにも処理を適用（追加）
       if (processing) {
-        const tagName = gtagIdToName.get(tagId);
+        const tagName = keyToName.get(tagKey);
         if (tagName) {
           const windowSize = window ? parseInt(window, 10) : null;
           try {
@@ -691,7 +688,7 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       
           // 処理オプションの適用
           if (processing) {
-            const tagName = tagIdToName.get(tagId);
+            const tagName = keyToName.get(tagKey);
             if (tagName) {
               const windowSize = window ? parseInt(window, 10) : null;
               const { executeProcess } = require('../utils/gtag-utils');
@@ -739,13 +736,13 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
       }
       
       // タグのデータを保存（修正）
-      tagData[tagId] = {};
-      
+      tagData[tagKey] = {};
+
       // すべてのポイントをタイムスタンプ辞書に追加
       data.forEach(point => {
         timestamps.add(point.timestamp);
         // 処理済みでも未処理でも同じく point.value を使用（これはすでに正しい値）
-        tagData[tagId][point.timestamp] = point.value;
+        tagData[tagKey][point.timestamp] = point.value;
       });
     }
     
@@ -756,25 +753,10 @@ router.get('/api/export/equipment/:equipmentId/csv', async (req, res) => {
     const shouldTreatZeroAsNull = zeroAsNull === 'true';
     const zeroAsNullTagsList = zeroAsNullTags.split(',').filter(tag => tag.trim() !== '');
     
-    // タグIDからタグ名への変換マップを作成
-    const idToNameMap = new Map();
-    for (const tagId of normalTagIds) {
-      const name = tagIdToName.get(tagId);
-      if (name) {
-        idToNameMap.set(tagId, name);
-      }
-    }
-    for (const gtagId of gtagIds) {
-      const name = gtagIdToName.get(gtagId);
-      if (name) {
-        idToNameMap.set(gtagId, name);
-      }
-    }
-    
     const csvRows = sortedTimestamps.map(timestamp => {
-      const values = allTagIds.map(tagId => {
-        const value = tagData[tagId][timestamp];
-        const tagName = idToNameMap.get(tagId);
+      const values = allTagKeys.map(tagKey => {
+        const value = tagData[tagKey][timestamp];
+        const tagName = keyToName.get(tagKey);
         
         // skipInvalidValuesがtrueの場合、無効値チェック
         if (skipInvalidValues === 'true') {

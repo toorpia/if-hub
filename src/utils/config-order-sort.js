@@ -97,16 +97,16 @@ const sortTagsByMultipleEquipmentOrder = (tags, equipmentNames) => {
 };
 
 /**
- * CSVエクスポート用のタグID順序ソート関数
- * @param {Array} tagIds - タグID配列
+ * CSVエクスポート用のタグキー順序ソート関数
+ * 通常タグとgtagはIDが衝突しうるため、種別付きのキー（tag:<id> / gtag:<id>）で扱う
+ * @param {Array} tagKeys - タグキー配列
  * @param {string} equipmentName - 設備名
- * @param {Map} tagIdToNameMap - タグIDから名前へのマッピング
- * @param {Map} gtagIdToNameMap - gtagIDから名前へのマッピング
- * @returns {Array} ソート済みタグID配列
+ * @param {Map} keyToNameMap - タグキーから名前へのマッピング
+ * @returns {Array} ソート済みタグキー配列
  */
-const sortTagIdsByConfigOrder = (tagIds, equipmentName, tagIdToNameMap, gtagIdToNameMap) => {
-  if (!equipmentName || !tagIds || tagIds.length === 0) {
-    return tagIds;
+const sortTagKeysByConfigOrder = (tagKeys, equipmentName, keyToNameMap) => {
+  if (!equipmentName || !tagKeys || tagKeys.length === 0) {
+    return tagKeys;
   }
 
   const sourceTags = equipmentConfigManager.getSourceTags(equipmentName);
@@ -124,10 +124,10 @@ const sortTagIdsByConfigOrder = (tagIds, equipmentName, tagIdToNameMap, gtagIdTo
     orderMap.set(tag, sourceTags.length + index);
   });
 
-  return tagIds.sort((a, b) => {
-    // タグIDから名前を取得
-    const tagNameA = tagIdToNameMap.get(a) || gtagIdToNameMap.get(a);
-    const tagNameB = tagIdToNameMap.get(b) || gtagIdToNameMap.get(b);
+  return tagKeys.sort((a, b) => {
+    // タグキーから名前を取得
+    const tagNameA = keyToNameMap.get(a);
+    const tagNameB = keyToNameMap.get(b);
     
     if (!tagNameA || !tagNameB) {
       return 0; // 名前が取得できない場合は順序を維持
@@ -143,5 +143,5 @@ const sortTagIdsByConfigOrder = (tagIds, equipmentName, tagIdToNameMap, gtagIdTo
 module.exports = {
   sortTagsByConfigOrder,
   sortTagsByMultipleEquipmentOrder,
-  sortTagIdsByConfigOrder
+  sortTagKeysByConfigOrder
 };
