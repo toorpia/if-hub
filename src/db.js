@@ -4,8 +4,18 @@
  * TimescaleDB/PostgreSQL Database Module
  * Direct replacement of SQLite implementation
  */
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const config = require('./config');
+
+// TIMESTAMPTZ (OID 1184) をDateではなくISO 8601文字列で返す
+// SQLite実装ではタイムスタンプをISO文字列で扱っており、gtag計算やCSVエクスポートは
+// 文字列として連結・比較・ソートする前提で書かれている
+const TIMESTAMPTZ_OID = 1184;
+const parseTimestampTz = types.getTypeParser(TIMESTAMPTZ_OID);
+types.setTypeParser(TIMESTAMPTZ_OID, (value) => {
+  const date = parseTimestampTz(value);
+  return date instanceof Date ? date.toISOString() : date;
+});
 
 console.log('Initializing TimescaleDB connection...');
 console.log(`  Host: ${config.database.host}`);
