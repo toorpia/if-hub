@@ -471,9 +471,14 @@ async function executeCustomImplementation(implementationPath, args, inputTagsDa
         for (const line of lines) {
           if (line.trim()) {
             try {
-              const [timestamp, valueStr] = line.split(',');
+              const [rawTimestamp, valueStr] = line.split(',');
               const value = parseFloat(valueStr);
-              
+
+              // スクリプトごとの出力形式の差（ミリ秒の有無など）を吸収し、
+              // 通常タグと同じISO 8601形式に揃える（解釈できない場合はそのまま）
+              const time = Date.parse(rawTimestamp);
+              const timestamp = Number.isNaN(time) ? rawTimestamp : new Date(time).toISOString();
+
               if (!isNaN(value)) {
                 results.push({
                   timestamp,
