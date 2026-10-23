@@ -7,14 +7,14 @@
   "bin": "./dist/cli/index.js",
   "scripts": {
     "build": "tsc",
-    "build:binary": "npm run build && pkg . --targets node18-linux-x64 --output dist/bin/if-hub-fetcher",
+    "build:binary": "npm run build && pkg . --targets node24-linux-x64 --output dist/bin/if-hub-fetcher",
     "start": "node dist/cli/index.js",
     "verify": "node fetch-and-verify.js",
     "lint": "eslint . --ext .ts"
   },
   "pkg": {
     "assets": ["node_modules/**/*"],
-    "targets": ["node18-linux-x64"],
+    "targets": ["node24-linux-x64"],
     "outputPath": "dist/bin"
   },
   "dependencies": {
